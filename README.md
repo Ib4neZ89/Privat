@@ -36,6 +36,7 @@ Die Personen werden in möglichst viele Untergruppen zerlegt, die sich untereina
 - **Link an Gruppe senden**: Die komplette Abrechnung steckt im Link (hinter dem `#`, wird nie an einen Server übertragen). Teilnehmer sehen alles schreibgeschützt.
 - Ein Teilnehmer wählt „Ich bin …“ und kann **Überweisungen abhaken, die er empfangen hat**. Danach schickt er dem Admin einen **Bestätigungslink**; öffnet der Admin ihn, wird die Zahlung verbucht.
 - Bereits verbuchte Zahlungen werden verrechnet. Kommen danach neue Ausgaben hinzu, berechnet die App nur noch den verbleibenden Ausgleich.
+- **Abrechnung als Excel** (Reiter „Ausgleich“ oder Menü ⋯): umfangreiche `.xlsx` im Aufbau der Excel-Vorlage – Vorkasse, Aufteilung/Verbrauch mit Zeilen- und Gegenprobe, Bilanz (Σ1, Σ2, ΣVV, ΣA, Σges), Ausgleichsmatrix *von \ an* und Überweisungsliste. Alle Summen sind echte Formeln mit rot/grünen Kontrollfeldern. Wird ohne Fremdbibliothek direkt im Browser erzeugt (`xlsx.js`, `report.js`).
 - **Export/Import** als JSON-Datei zur Sicherung oder zur Übertragung auf ein anderes Gerät.
 
 ## Installation auf Android
@@ -52,7 +53,8 @@ Die App ist dann unter `https://<benutzer>.github.io/<repo>/` erreichbar.
 Reines HTML/CSS/JavaScript ohne Build-Schritt.
 
 - `calc.js` – Rechenkern (Aufteilung, Bilanz, minimaler Ausgleich), ohne DOM
-- `app.js` – Oberfläche, Speicherung, Teilen-Links
+- `app.js` – Oberfläche, Speicherung, Teilen-Links, Updates
+- `xlsx.js` – minimaler XLSX-Schreiber · `report.js` – Aufbau der Excel-Abrechnung
 - `sw.js`, `manifest.webmanifest`, `icons/` – Offline-Fähigkeit und Installation
 
 Tests: `npm test` (benötigt Node ≥ 18). Lokal starten: `python3 -m http.server` im Projektordner.

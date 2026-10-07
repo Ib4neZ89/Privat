@@ -1,9 +1,9 @@
 // Offline-Unterstützung. Jede Version hat ihren eigenen Cache; eine neue Version wartet,
 // bis der Nutzer in der App auf „Jetzt aktualisieren“ tippt (oder alle Fenster geschlossen waren).
 // Bei jeder Änderung an der App VERSION hier und APP_VERSION in app.js gemeinsam erhöhen.
-const VERSION = 4;
+const VERSION = 5;
 const CACHE = 'abrechnung-v' + VERSION;
-const ASSETS = ['./', 'index.html', 'style.css', 'calc.js', 'app.js', 'manifest.webmanifest',
+const ASSETS = ['./', 'index.html', 'style.css', 'calc.js', 'xlsx.js', 'report.js', 'app.js', 'manifest.webmanifest',
   'icons/icon.svg', 'icons/icon-192.png', 'icons/icon-512.png', 'icons/apple-touch-icon.png'];
 
 self.addEventListener('install', (e) => {

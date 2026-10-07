@@ -8,7 +8,7 @@
 
   const STORE_KEY = 'abrechnung.v1';
   // Muss zu VERSION in sw.js passen (wird per Test geprüft).
-  const APP_VERSION = 4;
+  const APP_VERSION = 5;
   const app = document.getElementById('app');
   const dlg = document.getElementById('dlg');
 
@@ -306,6 +306,21 @@
     }
   }
 
+  function downloadReport(bill) {
+    try {
+      const bytes = window.Report.buildReport(bill);
+      const blob = new Blob([bytes], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = `Abrechnung-${bill.name.replace(/[^\wäöüÄÖÜß-]+/g, '_')}-${new Date().toISOString().slice(0, 10)}.xlsx`;
+      a.click();
+      setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+      toast('Abrechnung wird heruntergeladen');
+    } catch (e) {
+      toast('Erstellen fehlgeschlagen: ' + e.message, true);
+    }
+  }
+
   function exportBill(bill) {
     const blob = new Blob([JSON.stringify({ app: 'abrechnung', v: 1, bill: publicBill(bill) }, null, 2)], { type: 'application/json' });
     const a = document.createElement('a');
@@ -448,6 +463,7 @@
       ${s.suggestions.length ? `<ul class="list">${open}</ul>${tickHint}` : `<div class="card">${s.total ? '✓ Nichts mehr offen – alles ausgeglichen.' : 'Noch keine Ausgaben erfasst.'}</div>`}
       ${bill.payments.length ? `<h2>Erledigt</h2><ul class="list">${done}</ul>` : ''}
       <div class="btn-row">
+        <button class="btn primary" data-action="download-report">📊 Abrechnung als Excel</button>
         <button class="btn" data-action="share-result">Ergebnis als Text teilen</button>
         ${admin ? '<button class="btn" data-action="share-bill">Link an Gruppe senden</button>' : ''}
       </div>`;
@@ -716,6 +732,7 @@
 
     if (a === 'new-expense') return openExpense(bill, null);
     if (a === 'edit-expense') return openExpense(bill, bill.expenses.find((x) => x.id === el.dataset.id));
+    if (a === 'download-report') return downloadReport(bill);
     if (a === 'share-result') return shareUrl(`Abrechnung „${bill.name}“`, resultText(bill));
     if (a === 'share-bill') return shareBill(bill);
 
@@ -788,6 +805,7 @@
       const admin = isAdmin(bill);
       openDialog(`<div class="dlg-body"><h3>${esc(bill.name)}</h3><div class="menu-list">
         ${admin ? '<button class="btn" data-m="share">🔗 Link an Gruppe senden</button>' : ''}
+        <button class="btn" data-m="report">📊 Abrechnung als Excel herunterladen</button>
         <button class="btn" data-m="text">💬 Ergebnis als Text teilen</button>
         <button class="btn" data-m="export">⬇ Als Datei exportieren (Sicherung)</button>
         ${admin ? '<button class="btn" data-m="rename">✎ Umbenennen</button>' : ''}
@@ -802,6 +820,7 @@
           if (k === 'share') { closeDialog(); return shareBill(bill); }
           if (k === 'text') { closeDialog(); return shareUrl(`Abrechnung „${bill.name}“`, resultText(bill)); }
           if (k === 'export') { closeDialog(); return exportBill(bill); }
+          if (k === 'report') { closeDialog(); return downloadReport(bill); }
           if (k === 'rename') {
             const name = await promptDialog('Abrechnung umbenennen', bill.name);
             if (name) { bill.name = name; touch(bill); }
