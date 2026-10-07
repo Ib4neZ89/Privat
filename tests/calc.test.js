@@ -110,3 +110,11 @@ test('settle bei großer Gruppe fällt auf Greedy zurück und gleicht aus', () =
   const rest = applyTransfers(balances, Calc.settle(balances));
   assert.ok(Object.values(rest).every((v) => v === 0));
 });
+
+test('App-Version und Service-Worker-Version stimmen überein', () => {
+  const fs = require('node:fs');
+  const path = require('node:path');
+  const app = fs.readFileSync(path.join(__dirname, '..', 'app.js'), 'utf8').match(/APP_VERSION = (\d+)/)[1];
+  const sw = fs.readFileSync(path.join(__dirname, '..', 'sw.js'), 'utf8').match(/VERSION = (\d+)/)[1];
+  assert.strictEqual(app, sw);
+});

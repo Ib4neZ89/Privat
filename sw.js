@@ -1,10 +1,23 @@
-// Offline-Unterstützung: App-Dateien werden zwischengespeichert und im Hintergrund aktualisiert.
-const CACHE = 'abrechnung-v3';
+// Offline-Unterstützung. Jede Version hat ihren eigenen Cache; eine neue Version wartet,
+// bis der Nutzer in der App auf „Jetzt aktualisieren“ tippt (oder alle Fenster geschlossen waren).
+// Bei jeder Änderung an der App VERSION hier und APP_VERSION in app.js gemeinsam erhöhen.
+const VERSION = 4;
+const CACHE = 'abrechnung-v' + VERSION;
 const ASSETS = ['./', 'index.html', 'style.css', 'calc.js', 'app.js', 'manifest.webmanifest',
   'icons/icon.svg', 'icons/icon-192.png', 'icons/icon-512.png', 'icons/apple-touch-icon.png'];
 
 self.addEventListener('install', (e) => {
-  e.waitUntil(caches.open(CACHE).then((c) => c.addAll(ASSETS)).then(() => self.skipWaiting()));
+  // cache: 'reload' umgeht den HTTP-Cache, damit wirklich die neuen Dateien geladen werden.
+  e.waitUntil((async () => {
+    const cache = await caches.open(CACHE);
+    await cache.addAll(ASSETS.map((u) => new Request(u, { cache: 'reload' })));
+    // Ablösung der ersten Versionen (v1–v3) ohne Update-Button: sofort übernehmen statt zu warten.
+    if ((await caches.keys()).some((k) => /^abrechnung-v[123]$/.test(k))) self.skipWaiting();
+  })());
+});
+
+self.addEventListener('message', (e) => {
+  if (e.data && e.data.type === 'SKIP_WAITING') self.skipWaiting();
 });
 
 self.addEventListener('activate', (e) => {
@@ -18,10 +31,6 @@ self.addEventListener('fetch', (e) => {
   const key = e.request.mode === 'navigate' ? './' : e.request;
   e.respondWith(caches.open(CACHE).then(async (cache) => {
     const cached = await cache.match(key, { ignoreSearch: true });
-    const network = fetch(e.request).then((res) => {
-      if (res.ok) cache.put(key, res.clone());
-      return res;
-    }).catch(() => cached);
-    return cached || network;
+    return cached || fetch(e.request);
   }));
 });

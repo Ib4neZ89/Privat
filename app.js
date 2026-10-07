@@ -7,6 +7,8 @@
   const { parseEuro, formatEuro, summarize, evaluateExpense } = window.Calc;
 
   const STORE_KEY = 'abrechnung.v1';
+  // Muss zu VERSION in sw.js passen (wird per Test geprüft).
+  const APP_VERSION = 4;
   const app = document.getElementById('app');
   const dlg = document.getElementById('dlg');
 
@@ -269,6 +271,8 @@
         <button class="btn" data-action="import">Datei importieren</button>
       </div>
       <p class="footer-note">🔒 Alle Daten bleiben ausschließlich auf diesem Gerät.<br>Sicherung und Übertragung: Export als Datei oder per Link.</p>
+      <div class="version-row"><span>Version ${APP_VERSION}</span>
+        <button class="btn small" data-action="check-update">⟳ Nach Update suchen</button></div>
       <button class="fab" data-action="new-bill">+ Neue Abrechnung</button>
       <input type="file" id="import-file" accept="application/json,.json" hidden>`;
     app.querySelector('#import-file').addEventListener('change', importFile);
@@ -704,6 +708,8 @@
     const bill = view.bill && store.bills[view.bill];
 
     if (a === 'new-bill') return newBill();
+    if (a === 'check-update') return checkForUpdate(true);
+    if (a === 'apply-update') return applyUpdate();
     if (a === 'import') return app.querySelector('#import-file').click();
     if (a === 'install' && installPrompt) { installPrompt.prompt(); installPrompt = null; return render(); }
     if (!bill) return;
@@ -837,8 +843,69 @@
   });
 
   // ---------- Start ----------
-  if ('serviceWorker' in navigator && location.protocol.startsWith('http')) {
-    navigator.serviceWorker.register('sw.js').catch(() => {});
+  // ---------- Updates ----------
+  let swReg = null;
+  const swSupported = 'serviceWorker' in navigator && location.protocol.startsWith('http');
+
+  function showUpdateBar() {
+    if (document.getElementById('update-bar')) return;
+    const bar = document.createElement('div');
+    bar.id = 'update-bar';
+    bar.innerHTML = '<span>Neue Version verfügbar</span><button class="btn small primary" data-action="apply-update">Jetzt aktualisieren</button>';
+    document.body.appendChild(bar);
+  }
+
+  /** Meldet eine neue Version, sobald sie fertig geladen ist und wartet. */
+  function watchInstalling(worker) {
+    if (!worker) return;
+    worker.addEventListener('statechange', () => {
+      if (worker.state === 'installed' && navigator.serviceWorker.controller) showUpdateBar();
+    });
+  }
+
+  async function checkForUpdate(manual) {
+    if (!swSupported || !swReg) {
+      if (manual) toast('Updates sind nur in der installierten bzw. online geöffneten App möglich', true);
+      return;
+    }
+    if (swReg.waiting) return showUpdateBar();
+    try {
+      if (manual) toast('Suche nach Updates …');
+      await swReg.update();
+    } catch (e) {
+      if (manual) toast('Keine Verbindung – Update-Suche nicht möglich', true);
+      return;
+    }
+    if (swReg.waiting) return showUpdateBar();
+    if (swReg.installing) {
+      if (manual) toast('Neue Version wird geladen …');
+      return;
+    }
+    if (manual) toast(`Du hast die neueste Version (${APP_VERSION})`);
+  }
+
+  function applyUpdate() {
+    const waiting = swReg && swReg.waiting;
+    if (!waiting) { location.reload(); return; }
+    waiting.postMessage({ type: 'SKIP_WAITING' });
+  }
+
+  if (swSupported) {
+    let reloading = false;
+    navigator.serviceWorker.addEventListener('controllerchange', () => {
+      if (reloading) return;
+      reloading = true;
+      location.reload();
+    });
+    navigator.serviceWorker.register('sw.js').then((reg) => {
+      swReg = reg;
+      if (reg.waiting && navigator.serviceWorker.controller) showUpdateBar();
+      watchInstalling(reg.installing);
+      reg.addEventListener('updatefound', () => watchInstalling(reg.installing));
+      checkForUpdate(false);
+    }).catch(() => {});
+    // Beim Zurückkehren in die App erneut prüfen
+    document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') checkForUpdate(false); });
   }
   route();
 })();
