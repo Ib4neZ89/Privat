@@ -1,5 +1,5 @@
 // Offline-Unterstützung: App-Dateien werden zwischengespeichert und im Hintergrund aktualisiert.
-const CACHE = 'abrechnung-v2';
+const CACHE = 'abrechnung-v3';
 const ASSETS = ['./', 'index.html', 'style.css', 'calc.js', 'app.js', 'manifest.webmanifest',
   'icons/icon.svg', 'icons/icon-192.png', 'icons/icon-512.png', 'icons/apple-touch-icon.png'];
 

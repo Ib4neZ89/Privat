@@ -593,6 +593,9 @@
           sc.className = 'check ' + (amountOk ? 'ok' : 'bad');
           sc.textContent = amountOk ? `✓ ${nMembers} Person${nMembers > 1 ? 'en' : ''} · ${formatEuro(owedSum)}` : 'Betrag fehlt';
         }
+        // Restbetrag grau (Platzhalter) in allen noch leeren Feldern anzeigen – wird nicht übernommen
+        showRemainder('[data-payer]', x.amount);
+        showRemainder('[data-exact]', x.amount);
         // Eingabefelder rot markieren
         root.querySelectorAll('[data-payer]').forEach((i) => i.classList.toggle('invalid', i.value.trim() !== '' && Number.isNaN(parseEuro(i.value))));
         root.querySelectorAll('[data-exact]').forEach((i) => i.classList.toggle('invalid', i.value.trim() !== '' && Number.isNaN(parseEuro(i.value))));
@@ -607,6 +610,14 @@
         root.querySelector('#save-errors').textContent = '';
         forced = false;
       };
+      function showRemainder(selector, amount) {
+        const inputs = [...root.querySelectorAll(selector)];
+        if (!inputs.length) return;
+        const filled = inputs.reduce((sum, i) => { const c = parseEuro(i.value); return sum + (c > 0 ? c : 0); }, 0);
+        const rest = amount - filled;
+        for (const i of inputs) i.placeholder = !i.value.trim() && rest > 0 ? centsToInput(rest) : '';
+      }
+
       const rerenderSplit = () => {
         resetSave();
         root.querySelector('#split').innerHTML = splitSection();
@@ -643,11 +654,6 @@
         const b = ev.target.closest('button');
         if (!b) return;
         if (b.dataset.mode) {
-          if (b.dataset.mode === 'exact' && d.mode !== 'exact' && !Object.values(d.exact).some((v) => v)) {
-            // Vorbelegung mit der aktuellen Verteilung, damit nur noch angepasst werden muss
-            const { r } = refresh();
-            for (const p of people) d.exact[p.id] = centsToInput(r.owed[p.id]);
-          }
           d.mode = b.dataset.mode;
           rerenderSplit();
         } else if (b.dataset.quick) {
