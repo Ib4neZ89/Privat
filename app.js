@@ -8,7 +8,7 @@
 
   const STORE_KEY = 'abrechnung.v1';
   // Muss zu VERSION in sw.js passen (wird per Test geprüft).
-  const APP_VERSION = 5;
+  const APP_VERSION = 6;
   const app = document.getElementById('app');
   const dlg = document.getElementById('dlg');
 
@@ -203,7 +203,7 @@
       save();
       toast(local ? 'Abrechnung aktualisiert' : 'Abrechnung geöffnet');
     }
-    go(`#/b/${incoming.id}/ausgleich`);
+    go(`#/b/${incoming.id}/uebersicht`);
   }
 
   async function handleConfirm(data) {
@@ -237,7 +237,7 @@
     if (h.startsWith('#share=')) return handleShare(h.slice(7));
     if (h.startsWith('#confirm=')) return handleConfirm(h.slice(9));
     const m = h.match(/^#\/b\/([^/]+)(?:\/(\w+))?/);
-    view = m && store.bills[m[1]] ? { bill: m[1], tab: m[2] || 'ausgaben' } : { home: true };
+    view = m && store.bills[m[1]] ? { bill: m[1], tab: m[2] || 'uebersicht' } : { home: true };
     closeDialog();
     render();
   }
@@ -246,6 +246,45 @@
   function render() {
     if (view.home) renderHome();
     else renderBill(store.bills[view.bill], view.tab);
+  }
+
+  // ---------- Darstellung: Bausteine ----------
+  const CATS = [
+    { id: 'shop', icon: '🛒', label: 'Einkauf', re: /einkauf|supermarkt|lidl|aldi|rewe|edeka|netto|penny|kaufland|lebensmittel|markt|drogerie|dm\b/i },
+    { id: 'food', icon: '🍽️', label: 'Essen & Trinken', re: /essen|restaurant|pizza|döner|burger|imbiss|frühstück|mittag|abend|café|cafe|kaffee|bar\b|bier|getränk|wein|drinks?|kneipe|grill/i },
+    { id: 'stay', icon: '🏠', label: 'Unterkunft', re: /unterkunft|hotel|hütte|huette|airbnb|ferienwohnung|fewo|camping|zimmer|miete|übernachtung|hostel/i },
+    { id: 'travel', icon: '🚗', label: 'Fahrt', re: /tank|sprit|benzin|diesel|maut|vignette|parken|park|zug|bahn|bus|taxi|uber|flug|fähre|mietwagen|auto|fahrt|ticket/i },
+    { id: 'fun', icon: '🎟️', label: 'Aktivitäten', re: /eintritt|skipass|lift|kino|museum|tour|kurs|ausflug|aktivität|konzert|party|club|spa|therme|boot/i },
+    { id: 'other', icon: '📦', label: 'Sonstiges', re: null },
+  ];
+  const catOf = (e) => CATS.find((c) => c.id === e.category) || CATS.find((c) => c.re && c.re.test(e.title || '')) || CATS[CATS.length - 1];
+  const guessCat = (title) => (CATS.find((c) => c.re && c.re.test(title || '')) || CATS[CATS.length - 1]).id;
+
+  const me = (bill) => (bill.viewerAs && bill.people.some((p) => p.id === bill.viewerAs) ? bill.viewerAs : null);
+  const initials = (name) => {
+    const parts = String(name).trim().split(/\s+/);
+    return ((parts[0] || '?')[0] + (parts.length > 1 ? parts[parts.length - 1][0] : (parts[0][1] || ''))).toUpperCase();
+  };
+  function avatar(bill, id, size = '') {
+    const i = bill.people.findIndex((p) => p.id === id);
+    const p = bill.people[i];
+    return `<span class="av ${size}" style="--av:var(--c${(i % 8) + 1})" aria-hidden="true">${esc(p ? initials(p.name) : '?')}</span>`;
+  }
+  const dateLabel = (iso) => {
+    if (!iso) return 'Ohne Datum';
+    const d = new Date(iso + 'T12:00:00');
+    const today = new Date(); today.setHours(12, 0, 0, 0);
+    const diff = Math.round((today - d) / 86400000);
+    if (diff === 0) return 'Heute';
+    if (diff === 1) return 'Gestern';
+    return d.toLocaleDateString('de-DE', { weekday: 'short', day: '2-digit', month: 'long', year: 'numeric' });
+  };
+
+  function statusBanner(bill, s) {
+    if (!bill.people.length) return '';
+    if (s.invalid) return `<a class="status bad" href="#/b/${bill.id}/ausgaben">✗ <span><b>Unstimmig:</b> ${s.invalid} Ausgabe${s.invalid > 1 ? 'n sind' : ' ist'} fehlerhaft und ${s.invalid > 1 ? 'werden' : 'wird'} nicht berücksichtigt.</span></a>`;
+    if (!s.consistent) return `<div class="status bad">✗ <b>Unstimmig:</b> Vorkasse ${formatEuro(s.paidTotal)} ≠ Verbrauch ${formatEuro(s.owedTotal)}</div>`;
+    return '';
   }
 
   // ---------- Startseite ----------
@@ -258,22 +297,25 @@
     app.innerHTML = `
       <div class="home-head"><h1>Abrechnung</h1><p>Ausgaben teilen, fair ausgleichen.</p></div>
       ${installPrompt ? '<div class="btn-row"><button class="btn" data-action="install">📲 App installieren</button></div>' : ''}
-      ${bills.length ? `<ul class="list">${bills.map((b) => {
+      ${bills.length ? `<div class="bill-cards">${bills.map((b) => {
         const s = summarize(b);
-        const badge = !s.consistent ? '<span class="pill neg">Unstimmig</span>'
-          : s.allSettled && s.total ? '<span class="pill zero">Ausgeglichen</span>'
-            : `<span class="pill muted">${s.suggestions.length} offen</span>`;
-        return `<li><a class="row-btn" href="#/b/${b.id}">
-          <div class="row-main"><div class="row-title">${esc(b.name)}</div>
-          <div class="row-sub">${b.people.length} Personen · ${formatEuro(s.total)}${isAdmin(b) ? '' : ' · geteilt'}</div></div>${badge}</a></li>`;
-      }).join('')}</ul>` : '<div class="empty">Noch keine Abrechnung angelegt.</div>'}
-      <div class="btn-row">
-        <button class="btn" data-action="import">Datei importieren</button>
-      </div>
+        const badge = !s.consistent ? '<span class="pill neg">✗ Unstimmig</span>'
+          : s.allSettled && s.total ? '<span class="pill zero">✓ Ausgeglichen</span>'
+            : s.suggestions.length ? `<span class="pill muted">${s.suggestions.length} offen</span>` : '';
+        const m = me(b);
+        const mine = m && s.per[m] ? s.per[m].open : null;
+        return `<a class="bill-card" href="#/b/${b.id}">
+          <div class="bill-card-top"><span class="bill-name">${esc(b.name)}</span>${badge}</div>
+          <div class="bill-total">${formatEuro(s.total)}</div>
+          <div class="bill-card-bottom"><span class="av-stack">${b.people.slice(0, 6).map((p) => avatar(b, p.id, 'sm')).join('')}${b.people.length > 6 ? `<span class="av sm more">+${b.people.length - 6}</span>` : ''}</span>
+          <span class="muted-s">${mine === null || mine === undefined ? `${b.expenses.length} Ausgaben${isAdmin(b) ? '' : ' · geteilt'}` : mine === 0 ? 'Du: ausgeglichen' : `Du: <b class="${cls(mine)}">${signed(mine)}</b>`}</span></div>
+        </a>`;
+      }).join('')}</div>` : `<div class="empty-hero"><div class="empty-icon">🧾</div><b>Noch keine Abrechnung</b><p>Lege eine an – zum Beispiel für den nächsten Urlaub oder Ausflug.</p></div>`}
+      <div class="btn-row center"><button class="btn" data-action="import">Datei importieren</button></div>
       <p class="footer-note">🔒 Alle Daten bleiben ausschließlich auf diesem Gerät.<br>Sicherung und Übertragung: Export als Datei oder per Link.</p>
       <div class="version-row"><span>Version ${APP_VERSION}</span>
         <button class="btn small" data-action="check-update">⟳ Nach Update suchen</button></div>
-      <button class="fab" data-action="new-bill">+ Neue Abrechnung</button>
+      <button class="fab home" data-action="new-bill">+ Neue Abrechnung</button>
       <input type="file" id="import-file" accept="application/json,.json" hidden>`;
     app.querySelector('#import-file').addEventListener('change', importFile);
   }
@@ -284,7 +326,7 @@
     const bill = { id: uid(), name, createdAt: Date.now(), updatedAt: Date.now(), people: [], expenses: [], payments: [], role: 'admin' };
     store.bills[bill.id] = bill;
     save();
-    location.hash = `#/b/${bill.id}/teilnehmer`;
+    location.hash = `#/b/${bill.id}/uebersicht`;
   }
 
   async function importFile(e) {
@@ -331,119 +373,295 @@
   }
 
   // ---------- Abrechnung ----------
+  const TABS = [
+    ['uebersicht', 'Übersicht', '<path d="M3 11.5 12 4l9 7.5M5.5 9.5V20h13V9.5"/>'],
+    ['ausgaben', 'Ausgaben', '<path d="M6 3h12v18l-3-2-3 2-3-2-3 2zM9 8h6M9 12h6M9 16h3"/>'],
+    ['abrechnung', 'Abrechnung', '<path d="M4 4h16v16H4zM4 9h16M4 14.5h16M9.5 4v16"/>'],
+    ['ausgleich', 'Ausgleich', '<path d="M4 8h13l-3.5-3.5M20 16H7l3.5 3.5"/>'],
+  ];
+
   function renderBill(bill, tab) {
+    if (tab === 'teilnehmer') tab = 'uebersicht';
+    if (!TABS.some(([k]) => k === tab)) tab = 'uebersicht';
     document.title = bill.name + ' – Abrechnung';
     const s = summarize(bill);
     const admin = isAdmin(bill);
-    const tabs = [['teilnehmer', 'Teilnehmer'], ['ausgaben', 'Ausgaben'], ['ausgleich', 'Ausgleich']];
-
-    let status;
-    if (!bill.people.length) status = '<div class="status info">Lege zuerst die Teilnehmer an.</div>';
-    else if (s.invalid) status = `<div class="status bad">✗ <span><b>Unstimmig:</b> ${s.invalid} Ausgabe${s.invalid > 1 ? 'n sind' : ' ist'} fehlerhaft und ${s.invalid > 1 ? 'werden' : 'wird'} nicht berücksichtigt.</span></div>`;
-    else if (!s.consistent) status = `<div class="status bad">✗ <b>Unstimmig:</b> Vorkasse ${formatEuro(s.paidTotal)} ≠ Verbrauch ${formatEuro(s.owedTotal)}</div>`;
-    else if (s.total && s.allSettled) status = '<div class="status ok">✓ <span><b>Ausgeglichen</b> – alle stehen bei 0,00 €.</span></div>';
-    else status = `<div class="status ok">✓ <span><b>Stimmig:</b> Vorkasse = Verbrauch = ${formatEuro(s.total)}</span></div>`;
-
-    let viewerBar = '';
-    if (!admin) {
-      viewerBar = `<div class="status warn" style="flex-wrap:wrap"><span style="flex:1 1 180px">Geteilte Ansicht – nur der Admin kann Ausgaben ändern.</span>
-        <label style="flex:1 1 160px;color:inherit">Ich bin
-        <select data-change="viewer-as"><option value="">– bitte wählen –</option>
-        ${bill.people.map((p) => `<option value="${p.id}" ${bill.viewerAs === p.id ? 'selected' : ''}>${esc(p.name)}</option>`).join('')}
-        </select></label></div>`;
-    }
 
     let body = '';
-    if (tab === 'teilnehmer') body = renderPeople(bill, s, admin);
+    if (tab === 'ausgaben') body = renderExpenses(bill, s, admin);
+    else if (tab === 'abrechnung') body = renderSheet(bill, s);
     else if (tab === 'ausgleich') body = renderSettlement(bill, s, admin);
-    else body = renderExpenses(bill, s, admin);
+    else body = renderOverview(bill, s, admin);
+
+    const viewerNote = admin ? '' : '<div class="status warn">👀 Geteilte Ansicht – nur der Admin kann Ausgaben ändern.</div>';
+    const fab = admin && bill.people.length && (tab === 'uebersicht' || tab === 'ausgaben') ? '<button class="fab" data-action="new-expense">+ Ausgabe</button>' : '';
 
     app.innerHTML = `
-      <header class="bar"><a class="icon-btn" href="#/" aria-label="Zur Übersicht">‹</a>
+      <header class="bar"><a class="icon-btn" href="#/" aria-label="Zur Übersicht aller Abrechnungen">‹</a>
         <h1>${esc(bill.name)}</h1>
         <button class="icon-btn" data-action="bill-menu" aria-label="Menü">⋯</button></header>
-      ${viewerBar}${status}
-      <nav class="tabs">${tabs.map(([k, l]) => `<a href="#/b/${bill.id}/${k}" ${k === tab ? 'aria-current="page"' : ''}>${l}</a>`).join('')}</nav>
-      ${body}`;
+      ${viewerNote}${statusBanner(bill, s)}
+      ${body}${fab}
+      <nav class="bottom-nav" aria-label="Bereiche">${TABS.map(([k, l, icon]) => `<a href="#/b/${bill.id}/${k}" ${k === tab ? 'aria-current="page"' : ''}>
+        <svg viewBox="0 0 24 24" aria-hidden="true">${icon}</svg><span>${l}</span>${k === 'ausgleich' && s.suggestions.length ? `<i class="dot">${s.suggestions.length}</i>` : ''}</a>`).join('')}</nav>`;
+
+    // KittySplit-Prinzip: Wer einen geteilten Link öffnet, wird zuerst gefragt, wer er ist.
+    if (!admin && !me(bill) && bill.people.length && !dlg.open && !bill.askedMe) {
+      bill.askedMe = true; save();
+      askWhoAmI(bill);
+    }
   }
 
-  function renderPeople(bill, s, admin) {
-    const rows = bill.people.map((p) => {
-      const x = s.per[p.id];
-      return `<li><div class="row-btn">
-        <div class="row-main"><div class="row-title">${esc(p.name)}</div>
-        <div class="row-sub">Vorkasse ${formatEuro(x.paid)} · Verbrauch ${formatEuro(x.owed)}</div></div>
-        <span class="pill ${cls(x.balance)}">${signed(x.balance)}</span>
-        ${admin ? `<button class="icon-btn" data-action="person-menu" data-id="${p.id}" aria-label="${esc(p.name)} bearbeiten">⋯</button>` : ''}
-      </div></li>`;
-    }).join('');
-    return `
-      ${admin ? `<form class="card inline-form" data-form="add-person">
+  function askWhoAmI(bill) {
+    openDialog(`<div class="dlg-body"><h3>Wer bist du?</h3>
+      <p class="hint">Dann siehst du sofort, was du bekommst oder zahlen musst, und kannst erhaltene Überweisungen bestätigen.</p>
+      <div class="who-list">${bill.people.map((p) => `<button class="who" data-who="${p.id}">${avatar(bill, p.id)}<span>${esc(p.name)}</span></button>`).join('')}</div></div>
+      <div class="dlg-actions"><button class="btn" data-who="">Nur ansehen</button></div>`, (d) => {
+      d.addEventListener('click', (e) => {
+        const b = e.target.closest('[data-who]');
+        if (!b) return;
+        bill.viewerAs = b.dataset.who || null;
+        save(); closeDialog(); render();
+      });
+    });
+  }
+
+  // ----- Übersicht -----
+  function renderOverview(bill, s, admin) {
+    const m = me(bill);
+    const n = bill.people.length;
+    const dates = bill.expenses.map((e) => e.date).filter(Boolean).sort();
+    const span = dates.length ? (dates[0] === dates[dates.length - 1] ? fmtDate(dates[0]) : `${fmtDate(dates[0])} – ${fmtDate(dates[dates.length - 1])}`) : '';
+
+    const hero = `<section class="hero">
+      <div class="hero-label">Gesamtausgaben</div>
+      <div class="hero-num">${formatEuro(s.total)}</div>
+      <div class="hero-sub">${bill.expenses.length} Ausgabe${bill.expenses.length === 1 ? '' : 'n'} · ${n} Person${n === 1 ? '' : 'en'}${n ? ` · Ø ${formatEuro(Math.round(s.total / n))} p. P.` : ''}${span ? ` · ${span}` : ''}</div>
+      ${s.total && s.consistent ? `<div class="hero-chip ${s.allSettled ? 'ok' : ''}">${s.allSettled ? '✓ Ausgeglichen' : `✓ Stimmig · ${s.suggestions.length} Überweisung${s.suggestions.length === 1 ? '' : 'en'} offen`}</div>` : ''}
+    </section>`;
+
+    // Persönliche Kachel (Splitwise-Prinzip)
+    let mine = '';
+    if (n) {
+      if (m) {
+        const x = s.per[m];
+        const mineT = s.suggestions.filter((t) => t.from === m || t.to === m);
+        const headline = x.open > 0 ? `Du bekommst <b class="pos">${formatEuro(x.open)}</b>` : x.open < 0 ? `Du zahlst <b class="neg">${formatEuro(-x.open)}</b>` : '<b class="pos">Du bist ausgeglichen ✓</b>';
+        mine = `<section class="card me-card">
+          <div class="me-head">${avatar(bill, m, 'lg')}<div class="me-text"><div class="me-name">${esc(personName(bill, m))} <button class="link" data-action="who">ändern</button></div>
+          <div class="me-line">${headline}</div></div></div>
+          <div class="me-stats"><div><span>Bezahlt</span><b>${formatEuro(x.paid)}</b></div><div><span>Dein Anteil</span><b>${formatEuro(x.owed)}</b></div><div><span>Überwiesen</span><b>${formatEuro(x.sent - x.received)}</b></div></div>
+          ${mineT.length ? `<ul class="me-todo">${mineT.map((t) => t.from === m
+            ? `<li>Du zahlst an ${avatar(bill, t.to, 'xs')} <b>${esc(personName(bill, t.to))}</b><em>${formatEuro(t.amount)}</em></li>`
+            : `<li>${avatar(bill, t.from, 'xs')} <b>${esc(personName(bill, t.from))}</b> zahlt dir<em>${formatEuro(t.amount)}</em></li>`).join('')}</ul>` : ''}
+        </section>`;
+      } else {
+        mine = `<button class="card who-prompt" data-action="who"><span class="who-q">🙋</span><span><b>Wer bist du?</b><br><span class="muted-s">Wähle dich aus, um deinen persönlichen Stand zu sehen.</span></span></button>`;
+      }
+    }
+
+    // Salden als divergierende Balken
+    const maxAbs = Math.max(1, ...bill.people.map((p) => Math.abs(s.per[p.id].open)));
+    const balances = n ? `<section class="card">
+      <div class="card-head"><h2>Offene Salden</h2><a class="link" href="#/b/${bill.id}/ausgleich">Ausgleich →</a></div>
+      <ul class="bal-list">${bill.people.map((p) => {
+        const v = s.per[p.id].open;
+        const w = Math.round((Math.abs(v) / maxAbs) * 100);
+        return `<li class="${p.id === m ? 'is-me' : ''}" title="${esc(p.name)}: ${signed(v)}">${avatar(bill, p.id, 'sm')}<span class="bal-name">${esc(p.name)}</span>
+          <span class="bal-track"><span class="bal-half neg-half">${v < 0 ? `<i style="width:${w}%"></i>` : ''}</span><span class="bal-half pos-half">${v > 0 ? `<i style="width:${w}%"></i>` : ''}</span></span>
+          <span class="bal-val ${cls(v)}">${v === 0 ? '✓ 0,00 €' : signed(v)}</span></li>`;
+      }).join('')}</ul>
+      <p class="hint small">Grün: bekommt Geld · Rot: muss zahlen · bereits erfolgte Überweisungen sind verrechnet.</p>
+    </section>` : '';
+
+    // Teilnehmer
+    const people = `<section class="card">
+      <div class="card-head"><h2>Teilnehmer (${n})</h2></div>
+      ${n ? `<div class="people-chips">${bill.people.map((p) => `<button class="person-chip" ${admin ? `data-action="person-menu" data-id="${p.id}"` : 'disabled'}>${avatar(bill, p.id, 'sm')}<span>${esc(p.name)}</span></button>`).join('')}</div>` : '<p class="hint">Füge alle hinzu, die mitmachen.</p>'}
+      ${admin ? `<form class="inline-form" data-form="add-person" style="margin-top:12px">
         <input name="name" placeholder="Name hinzufügen" autocomplete="off" required aria-label="Name">
         <button class="btn primary">Hinzufügen</button></form>` : ''}
-      ${bill.people.length ? `<ul class="list">${rows}</ul>
-        <p class="hint">Grün = Guthaben (bekommt Geld), Rot = Schulden (muss zahlen). Guthaben = Vorkasse − Verbrauch.</p>`
-        : '<div class="empty">Noch keine Teilnehmer.</div>'}`;
+    </section>`;
+
+    // Kategorien (gestapelter Balken + Legende mit Werten)
+    let cats = '';
+    if (s.total) {
+      const sums = CATS.map((c, i) => ({ ...c, i, sum: 0 }));
+      for (const e of bill.expenses) if (s.results[e.id].ok) sums[CATS.indexOf(catOf(e))].sum += e.amount;
+      const used = sums.filter((c) => c.sum > 0);
+      cats = `<section class="card">
+        <div class="card-head"><h2>Wofür?</h2></div>
+        <div class="stack" role="img" aria-label="Ausgaben nach Kategorie">${used.map((c) => `<span style="flex:${c.sum};background:var(--c${c.i + 1})" title="${c.label}: ${formatEuro(c.sum)}"></span>`).join('')}</div>
+        <ul class="legend">${used.sort((a, b) => b.sum - a.sum).map((c) => `<li><i style="background:var(--c${c.i + 1})"></i>${c.icon} ${c.label}<span>${formatEuro(c.sum)}</span><em>${Math.round((c.sum / s.total) * 100)} %</em></li>`).join('')}</ul>
+      </section>`;
+    }
+
+    if (!n) return hero + people;
+    return hero + mine + balances + cats + people;
   }
 
-  function splitSummary(bill, e) {
-    const vals = Object.keys((e.split && e.split.values) || {});
-    if (vals.length === bill.people.length && e.split.mode === 'equal') return 'alle';
-    const names = vals.map((id) => personName(bill, id)).join(', ');
-    if (e.split.mode === 'shares') return 'Anteile: ' + vals.map((id) => `${personName(bill, id)} ${e.split.values[id]}`).join(', ');
-    if (e.split.mode === 'exact') return 'Beträge: ' + names;
-    return names || '–';
-  }
-
+  // ----- Ausgaben -----
+  let expenseQuery = '';
   function renderExpenses(bill, s, admin) {
-    if (!bill.people.length) return `<div class="empty">Zuerst <a href="#/b/${bill.id}/teilnehmer">Teilnehmer anlegen</a>.</div>`;
-    const items = bill.expenses.map((e, i) => {
-      const r = s.results[e.id];
-      const payers = Object.keys(e.payers || {}).map((id) => personName(bill, id)).join(', ') || '–';
-      return `<li class="${r.ok ? '' : 'bad'}"><button class="row-btn" data-action="edit-expense" data-id="${e.id}">
-        <span class="num">${i + 1}</span>
-        <div class="row-main"><div class="row-title">${esc(e.title || 'Ohne Bezeichnung')}</div>
-        <div class="row-sub">${r.ok ? `${esc(payers)} → ${esc(splitSummary(bill, e))}${e.date ? ' · ' + fmtDate(e.date) : ''}` : '⚠ ' + esc(r.errors.join(' · '))}</div></div>
-        <span class="row-amount">${formatEuro(e.amount || 0)}</span></button></li>`;
+    if (!bill.people.length) return `<div class="empty-hero"><div class="empty-icon">👥</div><b>Noch keine Teilnehmer</b><p><a href="#/b/${bill.id}/uebersicht">Zuerst Teilnehmer anlegen</a></p></div>`;
+    if (!bill.expenses.length) return `<div class="empty-hero"><div class="empty-icon">🧾</div><b>Noch keine Ausgaben</b><p>${admin ? 'Tippe auf „+ Ausgabe“, um die erste zu erfassen.' : 'Der Admin hat noch nichts eingetragen.'}</p></div>`;
+    const m = me(bill);
+    const q = expenseQuery.trim().toLowerCase();
+    const list = bill.expenses.map((e, i) => ({ e, i }))
+      .filter(({ e }) => !q || (e.title || '').toLowerCase().includes(q) || catOf(e).label.toLowerCase().includes(q));
+    const groups = new Map();
+    for (const it of list.sort((a, b) => (b.e.date || '').localeCompare(a.e.date || '') || b.i - a.i)) {
+      const k = it.e.date || '';
+      if (!groups.has(k)) groups.set(k, []);
+      groups.get(k).push(it);
+    }
+    const keys = [...groups.keys()].sort((a, b) => (!a ? 1 : !b ? -1 : b.localeCompare(a)));
+    const html = keys.map((k) => {
+      const items = groups.get(k);
+      const daySum = items.reduce((sum, { e }) => sum + (s.results[e.id].ok ? e.amount : 0), 0);
+      return `<div class="day-head"><span>${dateLabel(k)}</span><span>${formatEuro(daySum)}</span></div>
+      <ul class="list">${items.map(({ e, i }) => {
+        const r = s.results[e.id];
+        const c = catOf(e);
+        const payerIds = Object.keys(r.paid);
+        const payers = payerIds.length === 1 ? `${esc(personName(bill, payerIds[0]))} hat bezahlt` : `${payerIds.length} haben bezahlt`;
+        const nShare = Object.keys(r.owed).length;
+        const share = nShare === bill.people.length ? 'alle' : `${nShare} Pers.`;
+        let mineLine = '';
+        if (m && r.ok) {
+          const net = (r.paid[m] || 0) - (r.owed[m] || 0);
+          mineLine = net > 0 ? `<span class="pos">du bekommst ${formatEuro(net)}</span>` : net < 0 ? `<span class="neg">dein Anteil ${formatEuro(-net)}</span>` : '<span class="muted-s">nicht beteiligt</span>';
+          if (!(r.paid[m] || r.owed[m])) mineLine = '<span class="muted-s">nicht beteiligt</span>';
+        }
+        return `<li class="${r.ok ? '' : 'bad'}"><button class="row-btn" data-action="edit-expense" data-id="${e.id}">
+          <span class="cat-tile" style="--cat:var(--c${CATS.indexOf(c) + 1})" title="${c.label}">${c.icon}</span>
+          <div class="row-main"><div class="row-title"><span class="num">${i + 1}</span>${esc(e.title || 'Ohne Bezeichnung')}</div>
+          <div class="row-sub">${r.ok ? `${payers} · geteilt auf ${share}` : '⚠ ' + esc(r.errors.join(' · '))}</div></div>
+          <div class="row-right"><span class="row-amount">${formatEuro(e.amount || 0)}</span>${mineLine ? `<span class="row-mine">${mineLine}</span>` : ''}</div></button></li>`;
+      }).join('')}</ul>`;
     }).join('');
     return `
-      ${bill.expenses.length ? `<ul class="list">${items}
-        <li class="totals"><span>Σ ${bill.expenses.length - s.invalid} Ausgaben${s.invalid ? ` <span class="neg">(+${s.invalid} fehlerhaft)</span>` : ''}</span><span>${formatEuro(s.total)}</span></li></ul>`
-        : `<div class="empty">Noch keine Ausgaben.${admin ? '<br>Tippe auf „+ Ausgabe“.' : ''}</div>`}
-      ${admin ? '<button class="fab" data-action="new-expense">+ Ausgabe</button>' : ''}`;
+      <div class="search"><input type="search" data-input="expense-search" placeholder="🔍 Ausgaben durchsuchen" value="${esc(expenseQuery)}" aria-label="Ausgaben durchsuchen"></div>
+      ${html || '<div class="empty">Keine Treffer.</div>'}
+      <div class="sum-bar"><span>Σ ${bill.expenses.length - s.invalid} Ausgaben${s.invalid ? ` <span class="neg">(+${s.invalid} fehlerhaft)</span>` : ''}</span><b>${formatEuro(s.total)}</b></div>`;
   }
 
-  function renderSettlement(bill, s, admin) {
-    if (!bill.people.length) return '<div class="empty">Noch keine Teilnehmer.</div>';
-    let sumBal = 0; let sumTr = 0; let sumOpen = 0;
-    const rows = bill.people.map((p) => {
+  // ----- Abrechnung (Aufbau wie die Excel-Vorlage) -----
+  let sheetMode = 'paid';
+  function renderSheet(bill, s) {
+    const people = bill.people;
+    if (!people.length) return '<div class="empty">Noch keine Teilnehmer.</div>';
+    const modes = { paid: 'Vorkasse (Σ1)', owed: 'Verbrauch (Σ2)', net: 'Saldo' };
+    const colTot = people.map(() => 0);
+    let grand = 0;
+    const rows = bill.expenses.map((e, k) => {
+      const r = s.results[e.id];
+      let rowSum = 0;
+      const cells = people.map((p, i) => {
+        const v = sheetMode === 'paid' ? (r.paid[p.id] || 0) : sheetMode === 'owed' ? (r.owed[p.id] || 0) : (r.paid[p.id] || 0) - (r.owed[p.id] || 0);
+        if (r.ok) { colTot[i] += v; rowSum += v; }
+        return `<td class="${sheetMode === 'net' ? cls(v) : ''}">${v ? (sheetMode === 'net' ? signed(v) : formatEuro(v)) : '<span class="faint">–</span>'}</td>`;
+      }).join('');
+      const paid = Object.values(r.paid).reduce((a, b) => a + b, 0);
+      const owed = Object.values(r.owed).reduce((a, b) => a + b, 0);
+      const diff = paid - owed;
+      if (r.ok) grand += rowSum;
+      return `<tr class="${r.ok ? '' : 'row-bad'}"><td class="sticky num-c">${k + 1}</td><td class="sticky2 name-c">${catOf(e).icon} ${esc(e.title || 'Ohne Bezeichnung')}</td>
+        <td>${formatEuro(e.amount || 0)}</td>${cells}<td class="${r.ok && diff === 0 ? 'cell-ok' : 'cell-bad'}">${r.ok && diff === 0 ? '✓' : formatEuro(diff)}</td></tr>`;
+    }).join('');
+    const totLabel = sheetMode === 'paid' ? 'Σ1 Vorkasse' : sheetMode === 'owed' ? 'Σ2 Verbrauch' : 'ΣVV Guthaben';
+    const matrix = `<div class="table-wrap"><table class="sheet">
+      <thead><tr><th class="sticky">#</th><th class="sticky2 name-c">Leistung</th><th>Betrag</th>${people.map((p) => `<th>${esc(p.name)}</th>`).join('')}<th>Kontrolle</th></tr></thead>
+      <tbody>${rows || `<tr><td class="sticky"></td><td class="sticky2 name-c faint">Noch keine Ausgaben</td><td colspan="${people.length + 2}"></td></tr>`}</tbody>
+      <tfoot><tr><td class="sticky"></td><td class="sticky2 name-c">${totLabel}</td><td>${formatEuro(s.total)}</td>${colTot.map((v) => `<td class="${sheetMode === 'net' ? cls(v) : ''}">${sheetMode === 'net' ? signed(v) : formatEuro(v)}</td>`).join('')}
+      <td class="${(sheetMode === 'net' ? grand === 0 : grand === s.total) ? 'cell-ok' : 'cell-bad'}">${(sheetMode === 'net' ? grand === 0 : grand === s.total) ? '✓' : '✗'}</td></tr></tfoot>
+    </table></div>`;
+
+    // Bilanz
+    let tVV = 0; let tA = 0; let tG = 0;
+    const bil = people.map((p) => {
       const x = s.per[p.id];
-      const tr = x.sent - x.received;
-      sumBal += x.balance; sumTr += tr; sumOpen += x.open;
-      return `<tr><td>${esc(p.name)}</td>
-        <td class="${cls(x.balance)}">${signed(x.balance)}</td>
-        <td>${tr ? signed(tr) : '–'}</td>
+      const a = x.received - x.sent;
+      tVV += x.balance; tA += a; tG += x.open;
+      return `<tr><td class="name-c">${avatar(bill, p.id, 'xs')} ${esc(p.name)}</td><td>${formatEuro(x.paid)}</td><td>${formatEuro(x.owed)}</td>
+        <td class="${cls(x.balance)}">${signed(x.balance)}</td><td>${a ? signed(a) : '<span class="faint">–</span>'}</td>
         <td class="${x.open === 0 ? 'cell-ok' : cls(x.open)}">${x.open === 0 ? '✓ 0,00 €' : signed(x.open)}</td></tr>`;
     }).join('');
-    const table = `<div class="table-wrap"><table>
-      <thead><tr><th>Person</th><th>Guthaben</th><th>Überwiesen</th><th>Offen</th></tr></thead>
-      <tbody>${rows}</tbody>
-      <tfoot><tr><td>Σ Kontrolle</td><td class="${sumBal === 0 ? 'cell-ok' : 'cell-bad'}">${formatEuro(sumBal)}</td>
-      <td>${formatEuro(sumTr)}</td><td class="${sumOpen === 0 ? 'cell-ok' : 'cell-bad'}">${formatEuro(sumOpen)}</td></tr></tfoot>
-      </table></div>`;
+    const bilanz = `<div class="table-wrap"><table class="sheet">
+      <thead><tr><th class="name-c">Teilnehmer</th><th>Vorkasse Σ1</th><th>Verbrauch Σ2</th><th>Guthaben ΣVV<small>Σ1 − Σ2</small></th><th>Ausgleich ΣA<small>erhalten − gesendet</small></th><th>Offen Σges<small>ΣVV − ΣA</small></th></tr></thead>
+      <tbody>${bil}</tbody>
+      <tfoot><tr><td class="name-c">Σ Kontrolle</td><td>${formatEuro(s.paidTotal)}</td><td>${formatEuro(s.owedTotal)}</td>
+      <td class="${tVV === 0 ? 'cell-ok' : 'cell-bad'}">${formatEuro(tVV)}</td><td>${formatEuro(tA)}</td><td class="${tG === 0 ? 'cell-ok' : 'cell-bad'}">${formatEuro(tG)}</td></tr></tfoot>
+    </table></div>`;
 
-    const me = bill.viewerAs;
+    // Ausgleichsmatrix (erledigt + offen)
+    const idx = Object.fromEntries(people.map((p, i) => [p.id, i]));
+    const mat = people.map(() => people.map(() => ({ done: 0, open: 0 })));
+    for (const p of bill.payments) if (idx[p.from] !== undefined && idx[p.to] !== undefined) mat[idx[p.from]][idx[p.to]].done += p.amount;
+    for (const t of s.suggestions) mat[idx[t.from]][idx[t.to]].open += t.amount;
+    const sumOf = (c) => c.done + c.open;
+    const mrows = people.map((p, i) => `<tr><td class="name-c">${avatar(bill, p.id, 'xs')} ${esc(p.name)}</td>${people.map((q, j) => {
+      const c = mat[i][j];
+      if (i === j) return '<td class="diag"></td>';
+      if (!sumOf(c)) return '<td><span class="faint">–</span></td>';
+      return `<td class="${c.open ? 'mx-open' : 'mx-done'}" title="${c.done ? 'erledigt ' + formatEuro(c.done) : ''}${c.done && c.open ? ' · ' : ''}${c.open ? 'offen ' + formatEuro(c.open) : ''}">${formatEuro(sumOf(c))}${c.open ? '' : ' ✓'}</td>`;
+    }).join('')}<td><b>${formatEuro(mat[i].reduce((a, c) => a + sumOf(c), 0))}</b></td></tr>`).join('');
+    const colSums = people.map((q, j) => mat.reduce((a, row) => a + sumOf(row[j]), 0));
+    const matrixHtml = `<div class="table-wrap"><table class="sheet">
+      <thead><tr><th class="name-c">von \\ an</th>${people.map((p) => `<th>${esc(p.name)}</th>`).join('')}<th>Σ von</th></tr></thead>
+      <tbody>${mrows}</tbody>
+      <tfoot><tr><td class="name-c">Σ an</td>${colSums.map((v) => `<td>${formatEuro(v)}</td>`).join('')}<td class="cell-ok">✓</td></tr></tfoot>
+    </table></div>`;
+
+    // Statistik
+    const valid = bill.expenses.filter((e) => s.results[e.id].ok);
+    const top = valid.slice().sort((a, b) => b.amount - a.amount)[0];
+    const dates = valid.map((e) => e.date).filter(Boolean).sort();
+    const days = dates.length ? Math.round((new Date(dates[dates.length - 1]) - new Date(dates[0])) / 86400000) + 1 : 0;
+    const topPayer = people.slice().sort((a, b) => s.per[b.id].paid - s.per[a.id].paid)[0];
+    const stats = `<div class="tiles">
+      <div class="tile"><span>Ø pro Person</span><b>${formatEuro(Math.round(s.total / people.length))}</b></div>
+      <div class="tile"><span>Ø pro Ausgabe</span><b>${valid.length ? formatEuro(Math.round(s.total / valid.length)) : '–'}</b></div>
+      <div class="tile"><span>${days ? `Ø pro Tag (${days} Tag${days === 1 ? '' : 'e'})` : 'Ø pro Tag'}</span><b>${days ? formatEuro(Math.round(s.total / days)) : '–'}</b></div>
+      <div class="tile"><span>Größte Ausgabe</span><b>${top ? formatEuro(top.amount) : '–'}</b><small>${top ? esc(top.title || '') : ''}</small></div>
+      <div class="tile"><span>Hat am meisten ausgelegt</span><b>${topPayer && s.per[topPayer.id].paid ? esc(topPayer.name) : '–'}</b><small>${topPayer && s.per[topPayer.id].paid ? formatEuro(s.per[topPayer.id].paid) : ''}</small></div>
+      <div class="tile"><span>Überweisungen nötig</span><b>${s.suggestions.length + bill.payments.length}</b><small>${bill.payments.length} erledigt</small></div>
+    </div>`;
+
+    return `
+      <div class="sheet-actions"><button class="btn primary" data-action="download-report">📊 Als Excel herunterladen</button></div>
+      <h2>1 · Ausgaben je Teilnehmer</h2>
+      <div class="seg" role="group" aria-label="Ansicht">${Object.entries(modes).map(([k, l]) => `<button type="button" data-action="sheet-mode" data-mode="${k}" aria-pressed="${sheetMode === k}">${l}</button>`).join('')}</div>
+      ${matrix}
+      <p class="hint small">${sheetMode === 'paid' ? 'Wer hat bei welcher Ausgabe wie viel ausgelegt.' : sheetMode === 'owed' ? 'Welcher Anteil jeder Ausgabe auf wen entfällt.' : 'Ausgelegt minus Anteil je Ausgabe – die Zeilensumme ist immer 0.'} Kontrolle ✓: Vorkasse = Verbrauch.</p>
+      <h2>2 · Bilanz</h2>${bilanz}
+      <h2>3 · Ausgleichszahlungen <small>(Zeile zahlt an Spalte)</small></h2>${matrixHtml}
+      <p class="hint small">✓ = erledigt · orange = noch offen.</p>
+      <h2>4 · Statistik</h2>${stats}`;
+  }
+
+  // ----- Ausgleich -----
+  function renderSettlement(bill, s, admin) {
+    if (!bill.people.length) return '<div class="empty">Noch keine Teilnehmer.</div>';
+    const m = me(bill);
+    const openSum = s.suggestions.reduce((a, t) => a + t.amount, 0);
+    const hero = s.suggestions.length
+      ? `<section class="hero compact"><div class="hero-label">Noch offen</div><div class="hero-num">${s.suggestions.length} Überweisung${s.suggestions.length === 1 ? '' : 'en'}</div><div class="hero-sub">insgesamt ${formatEuro(openSum)} · so wenige wie möglich</div></section>`
+      : `<section class="hero compact ok"><div class="hero-num">${s.total ? '✓ Alles ausgeglichen' : 'Noch nichts abzurechnen'}</div>${s.total ? '<div class="hero-sub">Alle stehen bei 0,00 €.</div>' : ''}</section>`;
+
     const open = s.suggestions.map((t, i) => {
-      const canTick = admin || (me && me === t.to);
-      return `<li class="transfer"><div class="who"><b>${esc(personName(bill, t.from))}</b><span class="arrow">→</span><b>${esc(personName(bill, t.to))}</b></div>
-        <span class="row-amount">${formatEuro(t.amount)}</span>
-        ${canTick ? `<button class="btn small primary" data-action="tick" data-i="${i}">✓ Erhalten</button>` : ''}</li>`;
+      const canTick = admin || (m && m === t.to);
+      const mine = m && (t.from === m || t.to === m);
+      return `<li class="tcard ${mine ? 'is-me' : ''}">
+        <div class="tflow">${avatar(bill, t.from)}<span class="tarrow"><b>${formatEuro(t.amount)}</b><i></i></span>${avatar(bill, t.to)}</div>
+        <div class="tnames"><span>${esc(personName(bill, t.from))}${t.from === m ? ' (du)' : ''}</span><span>${esc(personName(bill, t.to))}${t.to === m ? ' (du)' : ''}</span></div>
+        ${canTick ? `<button class="btn small primary block" data-action="tick" data-i="${i}">✓ Erhalten</button>` : ''}</li>`;
     }).join('');
 
     const done = bill.payments.slice().reverse().map((p) => {
       const who = p.by && p.by !== 'admin' ? personName(bill, p.by) : 'Admin';
-      const canUndo = admin || (p.pending && p.by === me);
-      return `<li class="transfer done"><div class="who"><b>${esc(personName(bill, p.from))}</b><span class="arrow">→</span><b>${esc(personName(bill, p.to))}</b>
+      const canUndo = admin || (p.pending && p.by === m);
+      return `<li class="transfer done">${avatar(bill, p.from, 'sm')}<div class="who"><b>${esc(personName(bill, p.from))}</b><span class="arrow">→</span><b>${esc(personName(bill, p.to))}</b>
         <div class="row-sub">${p.pending ? '⏳ wartet auf Verbuchung durch Admin' : `✓ bestätigt von ${esc(who)}`} · ${fmtTime(p.at)}</div></div>
         <span class="row-amount">${formatEuro(p.amount)}</span>
         ${p.pending ? `<button class="btn small" data-action="resend" data-id="${p.id}" aria-label="Bestätigung erneut senden">Senden</button>` : ''}
@@ -452,20 +670,17 @@
 
     let tickHint = '';
     if (!admin && s.suggestions.length) {
-      tickHint = me ? '<p class="hint">Du kannst Überweisungen abhaken, die du erhalten hast. Danach schickst du dem Admin die Bestätigung.</p>'
-        : '<p class="hint">Wähle oben aus, wer du bist, um erhaltene Überweisungen abzuhaken.</p>';
+      tickHint = m ? '<p class="hint">Du kannst Überweisungen abhaken, die du erhalten hast. Danach schickst du dem Admin die Bestätigung.</p>'
+        : '<p class="hint"><button class="link" data-action="who">Wähle aus, wer du bist</button>, um erhaltene Überweisungen abzuhaken.</p>';
     }
 
-    return `
-      <h2>Bilanz</h2>${table}
-      <p class="hint">Guthaben = Vorkasse − Verbrauch. Offen = Guthaben nach bereits erfolgten Ausgleichszahlungen. Ziel: überall ✓ 0,00 €.</p>
-      <h2>${s.suggestions.length ? `Offene Überweisungen (${s.suggestions.length})` : 'Offene Überweisungen'}</h2>
-      ${s.suggestions.length ? `<ul class="list">${open}</ul>${tickHint}` : `<div class="card">${s.total ? '✓ Nichts mehr offen – alles ausgeglichen.' : 'Noch keine Ausgaben erfasst.'}</div>`}
+    return `${hero}
+      ${s.suggestions.length ? `<ul class="tlist">${open}</ul>${tickHint}` : ''}
       ${bill.payments.length ? `<h2>Erledigt</h2><ul class="list">${done}</ul>` : ''}
-      <div class="btn-row">
-        <button class="btn primary" data-action="download-report">📊 Abrechnung als Excel</button>
-        <button class="btn" data-action="share-result">Ergebnis als Text teilen</button>
-        ${admin ? '<button class="btn" data-action="share-bill">Link an Gruppe senden</button>' : ''}
+      <div class="action-grid">
+        <button class="btn" data-action="share-result">💬 Ergebnis teilen</button>
+        ${admin ? '<button class="btn" data-action="share-bill">🔗 Link an Gruppe</button>' : ''}
+        <button class="btn" data-action="download-report">📊 Excel</button>
       </div>`;
   }
 
@@ -494,6 +709,7 @@
     const payerIds = Object.keys(e.payers || {});
     const d = {
       title: e.title, amount: centsToInput(e.amount), date: e.date || '',
+      category: e.category || '',
       multi: payerIds.length > 1 || (payerIds.length === 1 && e.amount && e.payers[payerIds[0]] !== e.amount),
       single: payerIds[0] || people[0].id,
       payerIn: Object.fromEntries(people.map((p) => [p.id, centsToInput(e.payers[p.id])])),
@@ -517,13 +733,13 @@
         if (d.mode === 'shares') { const w = parseWeight(d.shares[p.id]); if (w > 0) values[p.id] = w; }
         if (d.mode === 'exact') { const c = parseEuro(d.exact[p.id]); if (c > 0) values[p.id] = c; }
       }
-      return { id: e.id, title: d.title.trim(), amount: Number.isNaN(amount) ? 0 : amount, date: d.date, payers, split: { mode: d.mode, values } };
+      return { id: e.id, title: d.title.trim(), amount: Number.isNaN(amount) ? 0 : amount, date: d.date, category: d.category || guessCat(d.title), payers, split: { mode: d.mode, values } };
     }
 
     const payerSection = () => d.multi
-      ? people.map((p) => `<div class="split-row"><div class="name"><span>${esc(p.name)}</span></div><span></span>
+      ? people.map((p) => `<div class="split-row"><div class="name">${avatar(bill, p.id, 'xs')}<span>${esc(p.name)}</span></div><span></span>
           <input inputmode="decimal" data-payer="${p.id}" value="${esc(d.payerIn[p.id])}" placeholder="0,00" aria-label="Gezahlt von ${esc(p.name)}"></div>`).join('')
-      : `<div class="chips">${people.map((p) => `<label class="chip"><input type="radio" name="single" value="${p.id}" ${d.single === p.id ? 'checked' : ''}><span>${esc(p.name)}</span></label>`).join('')}</div>`;
+      : `<div class="chips">${people.map((p) => `<label class="chip"><input type="radio" name="single" value="${p.id}" ${d.single === p.id ? 'checked' : ''}><span>${avatar(bill, p.id, 'xs')}${esc(p.name)}</span></label>`).join('')}</div>`;
 
     const splitSection = () => people.map((p) => {
       let input = '';
@@ -531,7 +747,7 @@
       else if (d.mode === 'exact') input = `<input inputmode="decimal" data-exact="${p.id}" value="${esc(d.exact[p.id])}" placeholder="0,00" aria-label="Betrag ${esc(p.name)}">`;
       else input = '<span></span>';
       const box = d.mode === 'equal' ? `<input type="checkbox" data-member="${p.id}" ${d.members.has(p.id) ? 'checked' : ''} aria-label="${esc(p.name)} beteiligt">` : '';
-      return `<div class="split-row" data-row="${p.id}"><label class="name">${box}<span>${esc(p.name)}</span></label>${input}<span class="calc" data-calc="${p.id}"></span></div>`;
+      return `<div class="split-row" data-row="${p.id}"><label class="name">${box}${avatar(bill, p.id, 'xs')}<span>${esc(p.name)}</span></label>${input}<span class="calc" data-calc="${p.id}"></span></div>`;
     }).join('');
 
     const modeLabel = { equal: 'Gleich', shares: 'Anteile', exact: 'Beträge' };
@@ -540,6 +756,7 @@
         <h3>${isNew ? 'Neue Ausgabe' : admin ? 'Ausgabe bearbeiten' : 'Ausgabe'}</h3>
         <fieldset ${admin ? '' : 'disabled'} style="margin:0">
         <div class="field"><label>Bezeichnung<input name="title" value="${esc(d.title)}" placeholder="z. B. Supermarkt, Unterkunft …" autocomplete="off"></label></div>
+        <div class="cat-chips" role="group" aria-label="Kategorie">${CATS.map((c) => `<button type="button" data-cat="${c.id}" aria-pressed="false" style="--cat:var(--c${CATS.indexOf(c) + 1})">${c.icon}<span>${c.label}</span></button>`).join('')}</div>
         <div class="grid2 field">
           <label>Betrag (€)<input name="amount" inputmode="decimal" value="${esc(d.amount)}" placeholder="0,00" autocomplete="off"></label>
           <label>Datum<input type="date" name="date" value="${esc(d.date)}"></label>
@@ -623,6 +840,11 @@
         return { x, r };
       }
 
+      function markCat() {
+        const cur = d.category || guessCat(d.title);
+        root.querySelectorAll('[data-cat]').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.cat === cur)));
+      }
+      markCat();
       const resetSave = () => {
         const sb = root.querySelector('[data-act="save"]');
         if (sb) sb.textContent = 'Speichern';
@@ -648,7 +870,7 @@
 
       form.addEventListener('input', (ev) => {
         const t = ev.target;
-        if (t.name === 'title') d.title = t.value;
+        if (t.name === 'title') { d.title = t.value; markCat(); }
         else if (t.name === 'amount') d.amount = t.value;
         else if (t.name === 'date') d.date = t.value;
         else if (t.dataset.payer) d.payerIn[t.dataset.payer] = t.value;
@@ -673,6 +895,7 @@
       form.addEventListener('click', (ev) => {
         const b = ev.target.closest('button');
         if (!b) return;
+        if (b.dataset.cat) { d.category = b.dataset.cat; markCat(); return; }
         if (b.dataset.mode) {
           d.mode = b.dataset.mode;
           rerenderSplit();
@@ -733,6 +956,8 @@
     if (a === 'new-expense') return openExpense(bill, null);
     if (a === 'edit-expense') return openExpense(bill, bill.expenses.find((x) => x.id === el.dataset.id));
     if (a === 'download-report') return downloadReport(bill);
+    if (a === 'who') return askWhoAmI(bill);
+    if (a === 'sheet-mode') { sheetMode = el.dataset.mode; return render(); }
     if (a === 'share-result') return shareUrl(`Abrechnung „${bill.name}“`, resultText(bill));
     if (a === 'share-bill') return shareBill(bill);
 
@@ -853,6 +1078,15 @@
     if (input) input.focus();
   });
 
+  document.addEventListener('input', (ev) => {
+    if (ev.target.dataset.input !== 'expense-search') return;
+    expenseQuery = ev.target.value;
+    const pos = ev.target.selectionStart;
+    render();
+    const inp = app.querySelector('[data-input="expense-search"]');
+    if (inp) { inp.focus(); try { inp.setSelectionRange(pos, pos); } catch (e) { /* type=search */ } }
+  });
+
   document.addEventListener('change', (ev) => {
     if (ev.target.dataset.change === 'viewer-as') {
       const bill = store.bills[view.bill];
@@ -903,7 +1137,9 @@
     if (manual) toast(`Du hast die neueste Version (${APP_VERSION})`);
   }
 
+  let updateRequested = false;
   function applyUpdate() {
+    updateRequested = true;
     const waiting = swReg && swReg.waiting;
     if (!waiting) { location.reload(); return; }
     waiting.postMessage({ type: 'SKIP_WAITING' });
@@ -912,7 +1148,8 @@
   if (swSupported) {
     let reloading = false;
     navigator.serviceWorker.addEventListener('controllerchange', () => {
-      if (reloading) return;
+      // Nur nach „Jetzt aktualisieren“ neu laden – nicht, wenn der Service Worker beim ersten Besuch übernimmt.
+      if (reloading || !updateRequested) return;
       reloading = true;
       location.reload();
     });

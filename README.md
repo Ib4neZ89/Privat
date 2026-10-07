@@ -7,7 +7,16 @@ Hervorgegangen aus der Excel-Vorlage „Abrechnung-Session-Rohling“.
 
 ## Bedienung
 
-1. **Teilnehmer** anlegen.
+Unten gibt es vier Bereiche:
+
+- **Übersicht** – Gesamtausgaben, persönlicher Stand („Du bekommst / Du zahlst“), offene Salden als Balken, Ausgaben nach Kategorie, Teilnehmer verwalten.
+- **Ausgaben** – nach Tagen gruppiert, mit Kategorie-Symbol, Suche und deinem Anteil je Ausgabe.
+- **Abrechnung** – aufgebaut wie die Excel-Vorlage: Ausgaben je Teilnehmer (umschaltbar Vorkasse Σ1 / Verbrauch Σ2 / Saldo) mit Zeilenkontrolle, Bilanz (Σ1, Σ2, ΣVV, ΣA, Σges), Ausgleichsmatrix *von \ an*, Statistik und Excel-Download.
+- **Ausgleich** – die nötigen Überweisungen zum Abhaken.
+
+Ablauf:
+
+1. **Teilnehmer** in der Übersicht anlegen.
 2. **Ausgaben** erfassen: Bezeichnung, Betrag, wer bezahlt hat (auch mehrere Zahler mit Teilbeträgen) und wer sich die Ausgabe teilt:
    - **Gleich** – Häkchen bei den Beteiligten
    - **Anteile** – Gewichtung, z. B. 2 : 1 : 1
