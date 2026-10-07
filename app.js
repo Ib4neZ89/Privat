@@ -50,14 +50,40 @@
   const isAdmin = (bill) => bill.role !== 'viewer';
 
   // ---------- Dialoge ----------
-  function openDialog(html, onMount) {
-    dlg.innerHTML = html;
+  /**
+   * Öffnet den (einzigen) Dialog. Der Inhalt steckt in einem frischen Wrapper, damit Event-Listener
+   * aus onMount mit dem Inhalt verschwinden und sich nicht am <dialog> ansammeln.
+   * options.lock: kein Schließen durch Tippen auf den Hintergrund; options.onCancel: Zurück/Escape abfangen.
+   */
+  let dialogOptions = {};
+  function openDialog(html, onMount, options = {}) {
+    dialogOptions = options;
+    dlg.innerHTML = '<div class="dlg-inner">' + html + '</div>';
     if (!dlg.open) dlg.showModal();
     dlg.scrollTop = 0;
-    if (onMount) onMount(dlg);
+    if (onMount) onMount(dlg.firstElementChild);
   }
-  function closeDialog() { if (dlg.open) dlg.close(); dlg.innerHTML = ''; }
-  dlg.addEventListener('click', (e) => { if (e.target === dlg) closeDialog(); });
+  function closeDialog() { dialogOptions = {}; if (dlg.open) dlg.close(); dlg.innerHTML = ''; }
+
+  // Schließen per Hintergrund nur bei einem echten Tipp daneben: Aufsetzen UND Loslassen außerhalb des Dialogs.
+  // (Ein "click" landet sonst auch dann auf dem <dialog>, wenn Inhalt während der Berührung verspringt –
+  // z. B. wenn die Bildschirmtastatur zuklappt – oder wenn man beim Markieren von Text nach außen zieht.)
+  const outside = (e) => {
+    const r = dlg.getBoundingClientRect();
+    return e.clientX < r.left || e.clientX > r.right || e.clientY < r.top || e.clientY > r.bottom;
+  };
+  let downOutside = false;
+  dlg.addEventListener('pointerdown', (e) => { downOutside = e.target === dlg && outside(e); });
+  dlg.addEventListener('click', (e) => {
+    const ok = downOutside && e.target === dlg && outside(e) && !dialogOptions.lock;
+    downOutside = false;
+    if (ok) closeDialog();
+  });
+  // Escape bzw. Android-Zurück
+  dlg.addEventListener('cancel', (e) => {
+    if (dialogOptions.onCancel && dialogOptions.onCancel() === false) e.preventDefault();
+    else { e.preventDefault(); closeDialog(); }
+  });
 
   function confirmDialog(text, okLabel = 'OK', danger = false) {
     return new Promise((resolve) => {
@@ -65,7 +91,7 @@
         <div class="dlg-actions"><button class="btn" data-r="0">Abbrechen</button>
         <button class="btn ${danger ? 'danger' : 'primary'}" data-r="1">${esc(okLabel)}</button></div>`, (d) => {
         d.querySelectorAll('[data-r]').forEach((b) => b.addEventListener('click', () => { closeDialog(); resolve(b.dataset.r === '1'); }));
-        d.addEventListener('close', () => resolve(false), { once: true });
+        dlg.addEventListener('close', () => resolve(false), { once: true });
       });
     });
   }
@@ -522,6 +548,18 @@
       </div>`, (root) => {
       const form = root.querySelector('#xf');
       let forced = false;
+      let dirty = false;
+      let cancelArmed = false;
+      form.addEventListener('input', () => { dirty = true; cancelArmed = false; }, true);
+      form.addEventListener('change', () => { dirty = true; cancelArmed = false; }, true);
+      form.addEventListener('click', (ev) => { if (ev.target.closest('button')) { dirty = true; cancelArmed = false; } }, true);
+      dialogOptions.onCancel = () => {
+        // Zurück-Taste/Escape: Ungespeicherte Eingaben erst nach zweitem Zurück verwerfen.
+        if (!admin || !dirty || cancelArmed) return true;
+        cancelArmed = true;
+        toast('Ungespeicherte Eingaben – nochmal Zurück zum Verwerfen');
+        return false;
+      };
 
       function refresh() {
         const x = build();
@@ -649,7 +687,7 @@
       });
       refresh();
       if (isNew) form.title.focus();
-    });
+    }, { lock: admin });
   }
 
   // ---------- Aktionen ----------
