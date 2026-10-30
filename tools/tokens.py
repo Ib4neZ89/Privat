@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Tokenzählung für die Fortschrittsseite (Skill session-fortschritt, Abschnitt 5 Kurzfassung; Regelwerk Tokens v11,
-Regelwerk Tokens v14, docs/token-regeln.md: Nachlauf je Segmentende, pflege ohne k01 + stabilAb,
+Regelwerk Tokens v15, docs/token-regeln.md: Nachlauf je Segmentende, pflege ohne k01 + stabilAb,
 Postfach aktionen, Auftragszustände blockiert/abgebrochen, Prüfregeln bis P27).
 
 Python statt tools/tokens.ps1, weil die Cloud-Session kein PowerShell hat. Nur Standardbibliothek,
@@ -14,15 +14,17 @@ Aufruf:
       Vollständiger Durchlauf: tokensUsed/tokensPartial/tokensForecast je Auftrag und meta/tokens.
       <Ordner> ist das out_dir eines ArtifactData-list der Sammlung "tasks".
       --versions "t01=5,t02=5,…" übernimmt die Dokumentversionen aus der list-Antwort (für if_version).
-      --zaehlung <ISO|leer> = meta/zaehlung.seit (Zählbeginn, von Phillip auf der Seite gesetzt). Nur wenn gesetzt,
-      gibt es den Kompensationstask k01 (bis zum Zählbeginn); sonst wird ein vorhandener k01 gelöscht.
+      --zaehlung-live '<Dokument meta/zaehlung, wie eben gelesen>' | fehlt  --gelesen <ISO, Zeitpunkt des Lesens>
+      Zählbeginn (Abschnitt 2/6): unmittelbar vor dem Aufruf live aus der Datenbank gelesen, nie aus einem Export.
+      Ohne gültigen, höchstens 120 s alten Lesewert bricht der Durchlauf ab (Exit 1, keine Ausgabe zum Schreiben).
+      Nur bei gesetztem seit gibt es den Kompensationstask k01 (bis zum Zählbeginn); sonst wird er gelöscht.
   python3 tools/tokens.py postfach --dir <Ordner mit aktionen/*.json> [--now <ISO>]
       Lesepflicht Postfach (Abschnitt 8): ungesehene Einträge auflisten und die Schreibvorgänge
       gesehen = true / gesehenAt = jetzt ausgeben (die Session löscht nie).
   python3 tools/tokens.py pruefen --dir <Ordner mit tasks/, meta/, aktionen/> --seite <html> [--vorher <meta/tokens.json des
       vorigen Laufs>] [--now <ISO>]
-      Selbstprüfung nach Skill Abschnitt 6 und Regelwerk Abschnitt 9. P27 prüft die Gesprächsrunden der
-      Haupt-Sessions ab pflege.seit bis meta/tokens.updatedAt.
+      Selbstprüfung nach Skill Abschnitt 6 und Regelwerk Abschnitt 9 mit Abnahmekriterien. Prüfzeitraum für P27 und
+      die Tagesquote: ab meta/zaehlung.seit (ohne Zählbeginn ab pflege.seit) bis meta/tokens.updatedAt.
 """
 import argparse
 import datetime as dt
@@ -35,6 +37,10 @@ from zoneinfo import ZoneInfo
 
 TZ = ZoneInfo('Europe/Berlin')
 NACHLAUF_MAX = dt.timedelta(minutes=15)
+LESE_MAX = dt.timedelta(seconds=120)
+K01_TITEL = 'Kompensation: Tokens vor dem Zählbeginn'
+K01_NOTE = ('Alle Tokens vor dem Zählbeginn; die Kachel zeigt sie mit Aufteilung zugeordnet / nicht zugeordnet. '
+            'tokensUsed ist der nicht zugeordnete Teil.')
 
 
 def parse(s):
@@ -222,7 +228,29 @@ def worked_min(d, now):
     return sum((e - s).total_seconds() for s, e in segmente(d, now)) / 60
 
 
+def zaehlbeginn(args):
+    """meta/zaehlung live (Abschnitt 2/6): Dokument wie eben aus der Datenbank gelesen oder „fehlt“. Bei fehlendem,
+    veraltetem oder unlesbarem Wert kein Durchlauf – nie „nicht gesetzt“ annehmen."""
+    roh, jetzt = (args.zaehlung_live or '').strip(), dt.datetime.now(dt.timezone.utc)
+    try:
+        gelesen = parse(args.gelesen)
+    except (TypeError, ValueError):
+        sys.exit('Abbruch: --gelesen fehlt oder ist ungültig – Zählbeginn erst live lesen.')
+    if not dt.timedelta(seconds=-5) <= jetzt - gelesen <= LESE_MAX:
+        sys.exit(f'Abbruch: Zählbeginn vor {(jetzt - gelesen).total_seconds():.0f} s gelesen – unmittelbar vor dem Durchlauf neu lesen.')
+    if roh == 'fehlt':
+        return None
+    if not roh.startswith('{') or os.path.exists(roh):
+        sys.exit('Abbruch: --zaehlung-live erwartet das live gelesene Dokument (JSON) oder „fehlt“, keine Datei.')
+    try:
+        doc = json.loads(roh)
+        return parse(doc['seit']) if doc.get('seit') else None
+    except (ValueError, KeyError, TypeError):
+        sys.exit('Abbruch: Zählbeginn nicht lesbar – kein Durchlauf.')
+
+
 def run(args):
+    zbeginn = zaehlbeginn(args)
     now = parse(args.now) if args.now else dt.datetime.now(dt.timezone.utc)
     ordner = quellordner()
     msgs, log_start, _, _ = nachrichten(ordner)
@@ -235,7 +263,6 @@ def run(args):
     used, rest = zuordnen(msgs, tasks, now)
     seit = parse(args.seit)
     # Kompensationstask nur bei gesetztem Zählbeginn: nicht zugeordnete Nachrichten davor gehen an k01
-    zbeginn = parse(args.zaehlung) if args.zaehlung else None
     komp = sum(n for ts, n in rest if zbeginn and ts < zbeginn)
     komp_id = next((tid for tid, t in tasks.items() if kompensation(t['data'])), None)
 
@@ -278,7 +305,8 @@ def run(args):
         d = t['data']
         if kompensation(d):
             task_out[tid] = {'version': t['version'], 'delete': zbeginn is None, 'fields': {} if zbeginn is None else {
-                'tokensUsed': komp, 'from': iso(log_start) if log_start else None, 'to': iso(zbeginn)}}
+                'tokensUsed': komp, 'from': iso(log_start) if log_start else None, 'to': iso(zbeginn),
+                'title': K01_TITEL, 'note': K01_NOTE}}
             continue
         f = {}
         f['tokensUsed'] = used[tid] if tid in used else {'__delete__': True}
@@ -299,11 +327,10 @@ def run(args):
                    'stabilAb': iso(stabil_ab)},
         'updatedAt': iso(now),
     }
-    # Zählbeginn gesetzt, aber noch kein k01: Dokument zum Anlegen ausgeben (Regelwerk v12 Abschnitt 2)
+    # Zählbeginn gesetzt, aber noch kein k01: Dokument zum Anlegen ausgeben (Abschnitt 2)
     if zbeginn is not None and komp_id is None:
         task_out['k01'] = {'version': None, 'create': {
-            'kind': 'kompensation', 'title': 'Kompensation: nicht zugeordnete Tokens vor dem Zählbeginn',
-            'note': 'Sammelt alle Tokens, die vor Beginn der Segmentpflege keinem Auftrag zuzuordnen sind, damit Gesamt und Zugeordnet aufgehen.',
+            'kind': 'kompensation', 'title': K01_TITEL, 'note': K01_NOTE,
             'from': iso(log_start) if log_start else None, 'to': iso(zbeginn), 'created': iso(log_start) if log_start else None,
             'registered': iso(now), 'tokensUsed': komp}, 'fields': {}}
     out = {'tasks': task_out, 'meta': meta,
@@ -417,12 +444,23 @@ def pruefen(args):
         tasks = {k: {'data': v, 'version': None} for k, v in T.items()}
         pu, _ = zuordnen(pm, tasks, parse(mt['updatedAt']))
         if pf.get('total', 0) - pf.get('unassigned', 0) != sum(pu.values()): B.append(('P25', 'meta', (pf.get('total', 0) - pf.get('unassigned', 0), sum(pu.values()))))
-        # P27: Gesprächsrunde mit Werkzeugaufruf ohne Auftrag (Runden ab pflege.seit bis zum letzten Durchlauf)
-        wem, _ = zuordner(tasks, parse(mt['updatedAt']))
-        rr = [r for r in runden(quellordner()) if seit <= r[0] <= parse(mt['updatedAt'])]
+        # Prüfzeitraum (Abschnitt 9): ab meta/zaehlung.seit, ohne Zählbeginn ab pflege.seit; davor ist Kompensation
+        ab = parse(z['seit']) if z.get('seit') else seit
+        bis = parse(mt['updatedAt'])
+        # P27: Gesprächsrunde mit Werkzeugaufruf ohne Auftrag (Runden im Prüfzeitraum bis zum letzten Durchlauf)
+        wem, _ = zuordner(tasks, bis)
+        rr = [r for r in runden(quellordner()) if ab <= r[0] <= bis]
         p27 = [iso(r[0]) for r in rr if not any(wem(t) for t in r[1])]
         teil27 = [iso(r[0]) for r in rr if not all(wem(t) for t in r[1]) and iso(r[0]) not in p27]
         for x in p27: B.append(('P27', x, ''))
+        # Abnahme: nicht zugeordnet im Prüfzeitraum < 3 % je Kalendertag
+        quote = {}
+        for t, u in msgs:
+            if ab <= t <= bis:
+                q = quote.setdefault(t.astimezone(TZ).date().isoformat(), [0, 0])
+                q[0] += sum(u.values())
+                q[1] += 0 if wem(t) else sum(u.values())
+        quote = {k: round(100 * b / a, 2) for k, (a, b) in sorted(quote.items()) if a}
     # P17: pflege.seit unverändert gegenüber dem vorigen Lauf
     if args.vorher and mt:
         alt = json.load(open(args.vorher, encoding='utf-8'))
@@ -443,10 +481,22 @@ def pruefen(args):
         if not v.get('gesehen') and mt and parse(v['at']) < parse(mt['updatedAt']): B.append(('P23', k, ''))
     if args.seite:
         m = re.search(r'fortschritt-vorlage" content="(\d+)', open(args.seite, encoding='utf-8').read())
-        if not m or int(m.group(1)) < 39: B.append(('P11', 'seite', m.group(1) if m else None))
+        if not m or int(m.group(1)) < 40: B.append(('P11', 'seite', m.group(1) if m else None))
+    abnahme = None
+    if mt:
+        abnahme = {'pruefzeitraum_ab': iso(ab), 'unassigned_prozent_je_tag': quote,
+                   'tagesquote_unter_3': all(v < 3 for v in quote.values()),
+                   'blockiert_ohne_entscheidungsschritt': [i for i, d in T.items() if d.get('status') == 'blockiert' and not any((x.get('name') or '').startswith('Entscheidung') for x in d.get('steps') or [])],
+                   'fertig_mit_offenen_schritten': [b[1] for b in B if b[0] == 'P18'],
+                   'vorlage': m.group(1) if args.seite and m else None,
+                   'vorlage_aktuell': bool(args.seite and m and int(m.group(1)) >= 40),
+                   'p01_p27_ohne_befund': not B}
+        abnahme['bestanden'] = all([abnahme['tagesquote_unter_3'], not abnahme['blockiert_ohne_entscheidungsschritt'],
+                                    not abnahme['fertig_mit_offenen_schritten'], abnahme['vorlage_aktuell'], abnahme['p01_p27_ohne_befund']])
     print(json.dumps({'auftraege': len([d for d in T.values() if not kompensation(d)]), 'k01': any(kompensation(d) for d in T.values()),
                       'aktionen': len(akt), 'befunde': B,
                       'p27': {'runden': len(rr), 'teilweise_ohne_auftrag': teil27} if mt else 'nicht geprüft',
+                      'abnahme': abnahme,
                       'nicht_geprueft': ['P14 (Vergleich mit dem vorigen Lauf)'] + ([] if args.vorher else ['P17 (ohne --vorher)'])}, ensure_ascii=False))
 
 
@@ -468,7 +518,8 @@ if __name__ == '__main__':
     r.add_argument('--now')
     r.add_argument('--out')
     r.add_argument('--versions')
-    r.add_argument('--zaehlung', default='')
+    r.add_argument('--zaehlung-live', required=True)
+    r.add_argument('--gelesen', required=True)
     r.set_defaults(fn=run)
     pf = sp.add_parser('postfach')
     pf.add_argument('--dir', required=True)
