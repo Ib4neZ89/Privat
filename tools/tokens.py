@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """
 Tokenzählung für die Fortschrittsseite (Skill session-fortschritt, Abschnitt 5 Kurzfassung; Regelwerk Tokens v11,
-Regelwerk Tokens v13, docs/token-regeln.md: Nachlauf je Segmentende, pflege ohne k01 + stabilAb,
-Postfach aktionen, Auftragszustände blockiert/abgebrochen, Prüfregeln).
+Regelwerk Tokens v14, docs/token-regeln.md: Nachlauf je Segmentende, pflege ohne k01 + stabilAb,
+Postfach aktionen, Auftragszustände blockiert/abgebrochen, Prüfregeln bis P27).
 
 Python statt tools/tokens.ps1, weil die Cloud-Session kein PowerShell hat. Nur Standardbibliothek,
 keine Geheimnisse, gibt keine Protokollinhalte aus – nur Zählwerte und Zeitstempel.
@@ -21,7 +21,8 @@ Aufruf:
       gesehen = true / gesehenAt = jetzt ausgeben (die Session löscht nie).
   python3 tools/tokens.py pruefen --dir <Ordner mit tasks/, meta/, aktionen/> --seite <html> [--vorher <meta/tokens.json des
       vorigen Laufs>] [--now <ISO>]
-      Selbstprüfung nach Skill Abschnitt 6 und Regelwerk Abschnitt 9.
+      Selbstprüfung nach Skill Abschnitt 6 und Regelwerk Abschnitt 9. P27 prüft die Gesprächsrunden der
+      Haupt-Sessions ab pflege.seit bis meta/tokens.updatedAt.
 """
 import argparse
 import datetime as dt
@@ -115,12 +116,13 @@ def segmente(d, now):
     return [(parse(s['start']), parse(s['end']) if s.get('end') else now) for s in d.get('segments') or []]
 
 
-def zuordnen(msgs, tasks, now):
+def zuordner(tasks, now):
+    """Liefert wem(ts) → Task-id oder None (Segmente vor Vor-/Nachlauf, Abschnitt 4)."""
     seg = {tid: segmente(t['data'], now) for tid, t in tasks.items() if not ausgenommen(t['data'])}
     seg = {k: v for k, v in seg.items() if v}
     created = {tid: parse(t['data']['created']) for tid, t in tasks.items() if t['data'].get('created') and not ausgenommen(t['data'])}
     registered = {tid: parse(t['data']['registered']) for tid, t in tasks.items() if t['data'].get('registered') and not ausgenommen(t['data'])}
-    # Nachlauf nach jedem Segmentende (v13 Abschnitt 4): bis zum frühesten created ≥ Ende unter den danach
+    # Nachlauf nach jedem Segmentende (Abschnitt 4): bis zum frühesten created ≥ Ende unter den danach
     # registrierten Aufträgen, höchstens 15 min; ein eigenes späteres Segment beendet ihn ebenfalls.
     nach = []
     for tid, ss in seg.items():
@@ -129,21 +131,56 @@ def zuordnen(msgs, tasks, now):
             grenzen += [s for s, _ in ss if s >= ende]
             nach.append((tid, ende, min([ende + NACHLAUF_MAX] + grenzen)))
     vor = {tid: (created[tid], min(s for s, _ in ss)) for tid, ss in seg.items() if tid in created}
-    used = {tid: 0 for tid in seg}
-    rest = []
-    for ts, u in msgs:
-        n = sum(u.values())
+
+    def wem(ts):
         drin = [(s, num(tid), tid) for tid, ss in seg.items() for s, e in ss if s <= ts < e]
         if drin:
-            used[max(drin)[2]] += n
-            continue
+            return max(drin)[2]
         kand = [(a, num(tid), tid) for tid, (a, b) in vor.items() if a <= ts < b]
         kand += [(a, num(tid), tid) for tid, a, b in nach if a <= ts < b]
-        if kand:
-            used[max(kand)[2]] += n
+        return max(kand)[2] if kand else None
+    return wem, list(seg)
+
+
+def zuordnen(msgs, tasks, now):
+    wem, ids = zuordner(tasks, now)
+    used = {tid: 0 for tid in ids}
+    rest = []
+    for ts, u in msgs:
+        tid = wem(ts)
+        if tid:
+            used[tid] += sum(u.values())
         else:
-            rest.append((ts, n))
+            rest.append((ts, sum(u.values())))
     return used, rest
+
+
+def runden(ordner):
+    """Gesprächsrunden der Haupt-Sessions (ohne Subagenten): Nachricht von Phillip bis zur letzten Antwort vor der
+    nächsten. Je Runde (Beginn, Zeitpunkte der Antworten mit Werkzeugaufruf)."""
+    R = []
+    for o_ in ordner:
+        for f in sorted(glob.glob(os.path.join(o_, '*.jsonl'))):
+            cur = None
+            for z in open(f, encoding='utf-8'):
+                try:
+                    o = json.loads(z)
+                except json.JSONDecodeError:
+                    continue
+                m = o.get('message') or {}
+                c = m.get('content') if isinstance(m, dict) else None
+                if o.get('type') == 'user' and not o.get('isMeta') and not o.get('isCompactSummary'):
+                    teile = [c] if isinstance(c, str) else [x for x in c or [] if isinstance(x, dict)]
+                    if any(isinstance(x, dict) and x.get('type') == 'tool_result' for x in teile):
+                        continue
+                    text = ''.join(x if isinstance(x, str) else x.get('text', '') for x in teile).strip()
+                    if text and not text.startswith('<'):
+                        cur = (parse(o['timestamp']), [])
+                        R.append(cur)
+                elif o.get('type') == 'assistant' and cur and isinstance(c, list):
+                    if any(isinstance(x, dict) and x.get('type') == 'tool_use' for x in c):
+                        cur[1].append(parse(o['timestamp']))
+    return [r for r in R if r[1]]
 
 
 def kompensation(d):
@@ -328,7 +365,9 @@ def pruefen(args):
         if not parse(d['created']) <= parse(d['registered']) <= parse(d.get('plannedStart') or d['registered']): B.append(('P05', i, ''))
         S = segs(d)
         summ = sum((e - s).total_seconds() for s, e in S) / 60
-        if d['status'] == 'fertig' and not ret(d):
+        kzb = 'kein Zeitraum belegbar' in (d.get('note') or '')
+        if d['status'] in ('fertig', 'abgebrochen') and not ret(d) and not S and not kzb: B.append(('P26', i, ''))
+        if d['status'] == 'fertig' and not ret(d) and not kzb:
             if not d.get('durationMin') or abs(d['durationMin'] - summ) > 2 or d.get('progressNote') or 'tokensForecast' in d or not d.get('notes'):
                 B.append(('P06', i, round(summ, 2)))
             if not S: B.append(('P16', i, ''))
@@ -378,6 +417,12 @@ def pruefen(args):
         tasks = {k: {'data': v, 'version': None} for k, v in T.items()}
         pu, _ = zuordnen(pm, tasks, parse(mt['updatedAt']))
         if pf.get('total', 0) - pf.get('unassigned', 0) != sum(pu.values()): B.append(('P25', 'meta', (pf.get('total', 0) - pf.get('unassigned', 0), sum(pu.values()))))
+        # P27: Gesprächsrunde mit Werkzeugaufruf ohne Auftrag (Runden ab pflege.seit bis zum letzten Durchlauf)
+        wem, _ = zuordner(tasks, parse(mt['updatedAt']))
+        rr = [r for r in runden(quellordner()) if seit <= r[0] <= parse(mt['updatedAt'])]
+        p27 = [iso(r[0]) for r in rr if not any(wem(t) for t in r[1])]
+        teil27 = [iso(r[0]) for r in rr if not all(wem(t) for t in r[1]) and iso(r[0]) not in p27]
+        for x in p27: B.append(('P27', x, ''))
     # P17: pflege.seit unverändert gegenüber dem vorigen Lauf
     if args.vorher and mt:
         alt = json.load(open(args.vorher, encoding='utf-8'))
@@ -401,6 +446,7 @@ def pruefen(args):
         if not m or int(m.group(1)) < 39: B.append(('P11', 'seite', m.group(1) if m else None))
     print(json.dumps({'auftraege': len([d for d in T.values() if not kompensation(d)]), 'k01': any(kompensation(d) for d in T.values()),
                       'aktionen': len(akt), 'befunde': B,
+                      'p27': {'runden': len(rr), 'teilweise_ohne_auftrag': teil27} if mt else 'nicht geprüft',
                       'nicht_geprueft': ['P14 (Vergleich mit dem vorigen Lauf)'] + ([] if args.vorher else ['P17 (ohne --vorher)'])}, ensure_ascii=False))
 
 
