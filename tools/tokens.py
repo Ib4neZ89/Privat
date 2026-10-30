@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Tokenzählung für die Fortschrittsseite (Skill session-fortschritt, Abschnitt 5 Kurzfassung; Regelwerk Tokens v11,
-docs/token-regeln.md: Kompensationstask k01; meta/tokens.hours wie in Vorlage 34 dokumentiert).
+Regelwerk Tokens v12, docs/token-regeln.md: meta/zaehlung, Kompensationstask k01, meta/tokens.hours).
 
 Python statt tools/tokens.ps1, weil die Cloud-Session kein PowerShell hat. Nur Standardbibliothek,
 keine Geheimnisse, gibt keine Protokollinhalte aus – nur Zählwerte und Zeitstempel.
@@ -13,6 +13,8 @@ Aufruf:
       Vollständiger Durchlauf: tokensUsed/tokensPartial/tokensForecast je Auftrag und meta/tokens.
       <Ordner> ist das out_dir eines ArtifactData-list der Sammlung "tasks".
       --versions "t01=5,t02=5,…" übernimmt die Dokumentversionen aus der list-Antwort (für if_version).
+      --zaehlung <ISO|leer> = meta/zaehlung.seit (Zählbeginn, von Phillip auf der Seite gesetzt). Nur wenn gesetzt,
+      gibt es den Kompensationstask k01 (bis zum Zählbeginn); sonst wird ein vorhandener k01 gelöscht.
 """
 import argparse
 import datetime as dt
@@ -160,8 +162,9 @@ def run(args):
             tasks[tid.strip()]['version'] = int(v)
     used, rest = zuordnen(msgs, tasks, now)
     seit = parse(args.seit)
-    # Regelwerk v11 Abschnitt 2: nicht zugeordnete Nachrichten vor dem Stichtag gehen an den Kompensationstask
-    komp = sum(n for ts, n in rest if ts < seit)
+    # Kompensationstask nur bei gesetztem Zählbeginn: nicht zugeordnete Nachrichten davor gehen an k01
+    zbeginn = parse(args.zaehlung) if args.zaehlung else None
+    komp = sum(n for ts, n in rest if zbeginn and ts < zbeginn)
     komp_id = next((tid for tid, t in tasks.items() if kompensation(t['data'])), None)
 
     days, breakdown = {}, {'input': 0, 'cacheCreate': 0, 'cacheRead': 0, 'output': 0}
@@ -174,10 +177,10 @@ def run(args):
         breakdown['output'] += u['output_tokens']
     total = sum(days.values())
     # Stundensummen {"JJJJ-MM-TTTHH": {t, a}} (Europe/Berlin); a = zugeordnet inkl. Kompensation,
-    # damit Σ t = total und Σ a = assigned. Nicht zugeordnet bleiben nur Nachrichten ab dem Stichtag.
+    # damit Σ t = total und Σ a = assigned.
     offen = {}
     for ts, n in rest:
-        if ts >= seit:
+        if not (zbeginn and ts < zbeginn):
             offen[(ts, n)] = offen.get((ts, n), 0) + 1
     hours = {}
     for t, u in msgs:
@@ -200,8 +203,8 @@ def run(args):
     for tid, t in tasks.items():
         d = t['data']
         if kompensation(d):
-            task_out[tid] = {'version': t['version'], 'fields': {
-                'tokensUsed': komp, 'from': iso(log_start) if log_start else None, 'to': iso(seit)}}
+            task_out[tid] = {'version': t['version'], 'delete': zbeginn is None, 'fields': {} if zbeginn is None else {
+                'tokensUsed': komp, 'from': iso(log_start) if log_start else None, 'to': iso(zbeginn)}}
             continue
         f = {}
         f['tokensUsed'] = used[tid] if tid in used else {'__delete__': True}
@@ -221,8 +224,16 @@ def run(args):
         'pflege': {'seit': iso(seit), 'total': pf_total, 'assigned': pf_assigned, 'unassigned': pf_total - pf_assigned},
         'updatedAt': iso(now),
     }
+    # Zählbeginn gesetzt, aber noch kein k01: Dokument zum Anlegen ausgeben (Regelwerk v12 Abschnitt 2)
+    if zbeginn is not None and komp_id is None:
+        task_out['k01'] = {'version': None, 'create': {
+            'kind': 'kompensation', 'title': 'Kompensation: nicht zugeordnete Tokens vor dem Zählbeginn',
+            'note': 'Sammelt alle Tokens, die vor Beginn der Segmentpflege keinem Auftrag zuzuordnen sind, damit Gesamt und Zugeordnet aufgehen.',
+            'from': iso(log_start) if log_start else None, 'to': iso(zbeginn), 'created': iso(log_start) if log_start else None,
+            'registered': iso(now), 'tokensUsed': komp}, 'fields': {}}
     out = {'tasks': task_out, 'meta': meta,
-           'kompensation': {'id': komp_id, 'tokensUsed': komp, 'from': meta['logStart'], 'to': iso(seit)},
+           'kompensation': {'id': komp_id, 'aktiv': zbeginn is not None, 'tokensUsed': komp if zbeginn else None,
+                            'from': meta['logStart'], 'to': iso(zbeginn) if zbeginn else None},
            'ohne_kompensation': {'assigned': assigned_ohne, 'unassigned': total - assigned_ohne}}
     text = json.dumps(out, ensure_ascii=False, indent=1)
     if args.out:
@@ -251,6 +262,7 @@ if __name__ == '__main__':
     r.add_argument('--now')
     r.add_argument('--out')
     r.add_argument('--versions')
+    r.add_argument('--zaehlung', default='')
     r.set_defaults(fn=run)
     a = p.parse_args()
     a.fn(a)
