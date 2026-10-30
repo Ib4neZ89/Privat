@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Tokenzählung für die Fortschrittsseite (Skill session-fortschritt, Abschnitt 5 Kurzfassung; Regelwerk Tokens v11,
-docs/token-regeln.md: Kompensationstask k01).
+docs/token-regeln.md: Kompensationstask k01; meta/tokens.hours wie in Vorlage 34 dokumentiert).
 
 Python statt tools/tokens.ps1, weil die Cloud-Session kein PowerShell hat. Nur Standardbibliothek,
 keine Geheimnisse, gibt keine Protokollinhalte aus – nur Zählwerte und Zeitstempel.
@@ -173,6 +173,22 @@ def run(args):
         breakdown['cacheRead'] += u['cache_read_input_tokens']
         breakdown['output'] += u['output_tokens']
     total = sum(days.values())
+    # Stundensummen {"JJJJ-MM-TTTHH": {t, a}} (Europe/Berlin); a = zugeordnet inkl. Kompensation,
+    # damit Σ t = total und Σ a = assigned. Nicht zugeordnet bleiben nur Nachrichten ab dem Stichtag.
+    offen = {}
+    for ts, n in rest:
+        if ts >= seit:
+            offen[(ts, n)] = offen.get((ts, n), 0) + 1
+    hours = {}
+    for t, u in msgs:
+        n = sum(u.values())
+        k = t.astimezone(TZ).strftime('%Y-%m-%dT%H')
+        h = hours.setdefault(k, {'t': 0, 'a': 0})
+        h['t'] += n
+        if offen.get((t, n)):
+            offen[(t, n)] -= 1
+        else:
+            h['a'] += n
     assigned_ohne = sum(used.values())
     assigned = assigned_ohne + komp
     pf_msgs = [(t, u) for t, u in msgs if t >= seit]
@@ -199,7 +215,7 @@ def run(args):
         task_out[tid] = {'version': t['version'], 'fields': f}
 
     meta = {
-        'days': dict(sorted(days.items())), 'total': total, 'assigned': assigned, 'unassigned': total - assigned,
+        'days': dict(sorted(days.items())), 'hours': dict(sorted(hours.items())), 'total': total, 'assigned': assigned, 'unassigned': total - assigned,
         'breakdown': breakdown, 'sources': ordner, 'tz': 'Europe/Berlin',
         'logStart': iso(log_start) if log_start else None,
         'pflege': {'seit': iso(seit), 'total': pf_total, 'assigned': pf_assigned, 'unassigned': pf_total - pf_assigned},
@@ -213,6 +229,7 @@ def run(args):
         open(args.out, 'w', encoding='utf-8').write(text)
     print(json.dumps({'total': total, 'assigned': assigned, 'unassigned': total - assigned, 'pflege': meta['pflege'],
                       'kompensation': out['kompensation'], 'ohne_kompensation': out['ohne_kompensation'],
+                      'hours': len(hours), 'hours_check': [sum(h['t'] for h in hours.values()), sum(h['a'] for h in hours.values())],
                       'tasks': {k: v['fields'].get('tokensUsed') for k, v in sorted(task_out.items())}}, ensure_ascii=False))
 
 
