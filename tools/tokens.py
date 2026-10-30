@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """
 Tokenzählung für die Fortschrittsseite (Skill session-fortschritt, Abschnitt 5 Kurzfassung; Regelwerk Tokens v11,
-Regelwerk Tokens v12, docs/token-regeln.md: meta/zaehlung, Kompensationstask k01, meta/tokens.hours).
+Regelwerk Tokens v13, docs/token-regeln.md: Nachlauf je Segmentende, pflege ohne k01 + stabilAb,
+Postfach aktionen, Auftragszustände blockiert/abgebrochen, Prüfregeln).
 
 Python statt tools/tokens.ps1, weil die Cloud-Session kein PowerShell hat. Nur Standardbibliothek,
 keine Geheimnisse, gibt keine Protokollinhalte aus – nur Zählwerte und Zeitstempel.
@@ -15,6 +16,11 @@ Aufruf:
       --versions "t01=5,t02=5,…" übernimmt die Dokumentversionen aus der list-Antwort (für if_version).
       --zaehlung <ISO|leer> = meta/zaehlung.seit (Zählbeginn, von Phillip auf der Seite gesetzt). Nur wenn gesetzt,
       gibt es den Kompensationstask k01 (bis zum Zählbeginn); sonst wird ein vorhandener k01 gelöscht.
+  python3 tools/tokens.py postfach --dir <Ordner mit aktionen/*.json> [--now <ISO>]
+      Lesepflicht Postfach (Abschnitt 8): ungesehene Einträge auflisten und die Schreibvorgänge
+      gesehen = true / gesehenAt = jetzt ausgeben (die Session löscht nie).
+  python3 tools/tokens.py pruefen --dir <Ordner mit tasks/, meta/, aktionen/> --seite <html> [--now <ISO>]
+      Selbstprüfung nach Skill Abschnitt 6 und Regelwerk Abschnitt 9.
 """
 import argparse
 import datetime as dt
@@ -113,12 +119,14 @@ def zuordnen(msgs, tasks, now):
     seg = {k: v for k, v in seg.items() if v}
     created = {tid: parse(t['data']['created']) for tid, t in tasks.items() if t['data'].get('created') and not ausgenommen(t['data'])}
     registered = {tid: parse(t['data']['registered']) for tid, t in tasks.items() if t['data'].get('registered') and not ausgenommen(t['data'])}
-    # Nachlauf-Fenster je Auftrag mit Segmenten
-    nach = {}
+    # Nachlauf nach jedem Segmentende (v13 Abschnitt 4): bis zum frühesten created ≥ Ende unter den danach
+    # registrierten Aufträgen, höchstens 15 min; ein eigenes späteres Segment beendet ihn ebenfalls.
+    nach = []
     for tid, ss in seg.items():
-        ende = max(e for _, e in ss)
-        grenzen = [created[o] for o in created if o != tid and registered.get(o) and registered[o] > ende and created[o] >= ende]
-        nach[tid] = (ende, min([ende + NACHLAUF_MAX] + grenzen))
+        for _, ende in ss:
+            grenzen = [created[o] for o in created if o != tid and registered.get(o) and registered[o] > ende and created[o] >= ende]
+            grenzen += [s for s, _ in ss if s >= ende]
+            nach.append((tid, ende, min([ende + NACHLAUF_MAX] + grenzen)))
     vor = {tid: (created[tid], min(s for s, _ in ss)) for tid, ss in seg.items() if tid in created}
     used = {tid: 0 for tid in seg}
     rest = []
@@ -129,7 +137,7 @@ def zuordnen(msgs, tasks, now):
             used[max(drin)[2]] += n
             continue
         kand = [(a, num(tid), tid) for tid, (a, b) in vor.items() if a <= ts < b]
-        kand += [(a, num(tid), tid) for tid, (a, b) in nach.items() if a <= ts < b]
+        kand += [(a, num(tid), tid) for tid, a, b in nach if a <= ts < b]
         if kand:
             used[max(kand)[2]] += n
         else:
@@ -144,6 +152,32 @@ def kompensation(d):
 def ausgenommen(d):
     """Von der Zuordnung ausgenommen: Cloud-Aufträge mit Vermerk „created = Anlage“ und der Kompensationstask."""
     return 'created = Anlage' in (d.get('note') or '') or kompensation(d)
+
+
+def stabil(pf_msgs, pf_rest, seit, now, grenze=0.03):
+    """pflege.stabilAb: Beginn der ersten vollen Stunde ≥ seit, ab der an jedem Kalendertag bis heute der
+    nicht zugeordnete Anteil (ohne k01) unter 3 % liegt; sonst bzw. bei weniger als zwei Tagen Daten: seit."""
+    stunde = lambda t: t.astimezone(TZ).replace(minute=0, second=0, microsecond=0)
+    tot, una = {}, {}
+    for t, u in pf_msgs:
+        tot[stunde(t)] = tot.get(stunde(t), 0) + sum(u.values())
+    for t, n in pf_rest:
+        una[stunde(t)] = una.get(stunde(t), 0) + n
+    tage = sorted({h.date() for h in tot})
+    if len(tage) < 2:
+        return seit
+    erste = stunde(seit) + (dt.timedelta(hours=1) if stunde(seit) < seit.astimezone(TZ) else dt.timedelta(0))
+    for kand in sorted(h for h in tot if h >= erste):
+        ok = True
+        for tag in (x for x in tage if x >= kand.date()):
+            hs = [h for h in tot if h.date() == tag and h >= kand]
+            t_sum = sum(tot[h] for h in hs)
+            if t_sum and sum(una.get(h, 0) for h in hs) / t_sum >= grenze:
+                ok = False
+                break
+        if ok:
+            return kand
+    return seit
 
 
 def worked_min(d, now):
@@ -194,10 +228,12 @@ def run(args):
             h['a'] += n
     assigned_ohne = sum(used.values())
     assigned = assigned_ohne + komp
+    # pflege: nur Nachrichten ≥ seit, ohne Kompensationstask (k01 ist von der Zuordnung ausgenommen)
     pf_msgs = [(t, u) for t, u in msgs if t >= seit]
-    pf_used, _ = zuordnen(pf_msgs, tasks, now)
+    pf_used, pf_rest = zuordnen(pf_msgs, tasks, now)
     pf_total = sum(sum(u.values()) for _, u in pf_msgs)
     pf_assigned = sum(pf_used.values())
+    stabil_ab = stabil(pf_msgs, pf_rest, seit, now)
 
     task_out = {}
     for tid, t in tasks.items():
@@ -221,7 +257,8 @@ def run(args):
         'days': dict(sorted(days.items())), 'hours': dict(sorted(hours.items())), 'total': total, 'assigned': assigned, 'unassigned': total - assigned,
         'breakdown': breakdown, 'sources': ordner, 'tz': 'Europe/Berlin',
         'logStart': iso(log_start) if log_start else None,
-        'pflege': {'seit': iso(seit), 'total': pf_total, 'assigned': pf_assigned, 'unassigned': pf_total - pf_assigned},
+        'pflege': {'seit': iso(seit), 'total': pf_total, 'assigned': pf_assigned, 'unassigned': pf_total - pf_assigned,
+                   'stabilAb': iso(stabil_ab)},
         'updatedAt': iso(now),
     }
     # Zählbeginn gesetzt, aber noch kein k01: Dokument zum Anlegen ausgeben (Regelwerk v12 Abschnitt 2)
@@ -244,6 +281,116 @@ def run(args):
                       'tasks': {k: v['fields'].get('tokensUsed') for k, v in sorted(task_out.items())}}, ensure_ascii=False))
 
 
+def lade_ordner(ordner, sammlung):
+    docs = {}
+    for f in glob.glob(os.path.join(ordner, sammlung, '*.json')):
+        o = json.load(open(f, encoding='utf-8'))
+        docs[o.get('id') or os.path.basename(f)[:-5]] = o.get('data', o)
+    return docs
+
+
+def postfach(args):
+    now = parse(args.now) if args.now else dt.datetime.now(dt.timezone.utc)
+    akt = lade_ordner(args.dir, 'aktionen')
+    neu = {k: v for k, v in akt.items() if not v.get('gesehen')}
+    print(json.dumps({'gelesen': len(akt), 'ungesehen': len(neu),
+                      'eintraege': [{'id': k, 'typ': v.get('typ'), 'task': v.get('task'), 'grund': v.get('grund')} for k, v in neu.items()],
+                      'writes': [{'op': 'update', 'collection': 'aktionen', 'doc_id': k,
+                                  'data': {'gesehen': True, 'gesehenAt': iso(now)}} for k in neu]}, ensure_ascii=False))
+
+
+def pruefen(args):
+    import re
+    now = parse(args.now) if args.now else dt.datetime.now(dt.timezone.utc)
+    T = lade_ordner(args.dir, 'tasks')
+    meta = lade_ordner(args.dir, 'meta')
+    akt = lade_ordner(args.dir, 'aktionen')
+    st, mt, z = meta.get('state', {}), meta.get('tokens', {}), meta.get('zaehlung', {})
+    B = []
+    ret = lambda d: bool(re.search('rückwirkend|Sammeleintrag', d.get('note') or ''))
+    iso_ok = lambda x: isinstance(x, str) and re.match(r'^\d{4}-\d\d-\d\dT\d\d:\d\d(:\d\d(\.\d+)?)?([+-]\d\d:\d\d|Z)$', x)
+    segs = lambda d: [(parse(s['start']), parse(s['end']) if s.get('end') else now) for s in d.get('segments') or []]
+    STATI = ('offen', 'in_arbeit', 'pruefung', 'fertig', 'blockiert', 'abgebrochen')
+    for i, d in sorted(T.items()):
+        if kompensation(d):
+            for k in ('created', 'registered', 'from', 'to'):
+                if d.get(k) and not iso_ok(d[k]): B.append(('P03', i, k))
+            continue
+        for k in ('order', 'title', 'status', 'steps', 'created', 'registered'):
+            if d.get(k) in (None, '', []): B.append(('P01', i, k))
+        if d.get('status') not in STATI: B.append(('P02', i, d.get('status')))
+        zt = [d.get(k) for k in ('created', 'registered', 'plannedStart', 'updated') if d.get(k)]
+        zt += [x for s in d.get('segments') or [] for x in (s['start'], s.get('end')) if x]
+        for x in zt:
+            if not iso_ok(x): B.append(('P03', i, x))
+            elif parse(x) > now + dt.timedelta(minutes=1) and not (x == d.get('plannedStart') and d.get('status') == 'offen'): B.append(('P04', i, x))
+        if not parse(d['created']) <= parse(d['registered']) <= parse(d.get('plannedStart') or d['registered']): B.append(('P05', i, ''))
+        S = segs(d)
+        summ = sum((e - s).total_seconds() for s, e in S) / 60
+        if d['status'] == 'fertig' and not ret(d):
+            if not d.get('durationMin') or abs(d['durationMin'] - summ) > 2 or d.get('progressNote') or 'tokensForecast' in d or not d.get('notes'):
+                B.append(('P06', i, round(summ, 2)))
+            if not S: B.append(('P16', i, ''))
+        if ret(d) and 'durationMin' in d: B.append(('P06r', i, ''))
+        S2 = sorted(S)
+        for a, b in zip(S2, S2[1:]):
+            if b[0] < a[1]: B.append(('P09', i, 'Überlappung'))
+        for s_, e_ in S:
+            if not s_ < e_: B.append(('P09', i, 'start>=end'))
+        if 'tokensUsed' in d and not d.get('segments'): B.append(('P10a', i, ''))
+        if d.get('tokensPartial') is False: B.append(('P10', i, 'tokensPartial false'))
+        if 'tokensForecast' in d and d['status'] not in ('in_arbeit', 'pruefung'): B.append(('P10', i, 'Prognose'))
+        if not ret(d) and S and min(s for s, _ in S) > parse(d.get('plannedStart')) + dt.timedelta(minutes=2): B.append(('P15', i, ''))
+        if d['status'] == 'fertig' and any(not x.get('done') for x in d.get('steps') or []): B.append(('P18', i, ''))
+        if d['status'] == 'blockiert':
+            n = d.get('note') or ''
+            if not all(w in n for w in ('Blockiert:', 'Verantwortlich:', 'Entscheidung:')): B.append(('P22', i, ''))
+            letzte = max([parse(d.get('updated') or d['registered'])] + [e for _, e in S])
+            if now - letzte > dt.timedelta(days=7) and not any((x.get('name') or '').startswith('Entscheidung') for x in d.get('steps') or []):
+                B.append(('P21', i, ''))
+        if d['status'] == 'abgebrochen':
+            if 'abgebrochen:' not in (d.get('note') or '') or not d.get('abortedAt') or any(not s.get('end') for s in d.get('segments') or []) or 'tokensForecast' in d:
+                B.append(('P24', i, ''))
+    cur = st.get('current')
+    offen_seg = [i for i, d in T.items() for s in d.get('segments') or [] if not s.get('end')]
+    if cur:
+        d = T.get(cur, {})
+        if not d.get('progressNote') or now - parse(d.get('updated') or d['registered']) > dt.timedelta(minutes=60): B.append(('P07', cur, ''))
+        if d.get('status') not in ('in_arbeit', 'pruefung') or offen_seg != [cur]: B.append(('P08', cur, offen_seg))
+    elif offen_seg: B.append(('P08', '-', offen_seg))
+    alle = [(s, e, i) for i, d in T.items() if not kompensation(d) for s, e in segs(d)]
+    for a in alle:
+        for b in alle:
+            if a[2] < b[2] and a[0] < b[1] and b[0] < a[1] and not (ret(T[a[2]]) and ret(T[b[2]])): B.append(('P09', a[2] + '/' + b[2], 'Überlappung'))
+    if mt:
+        tot = sum(mt['days'].values())
+        ass = sum(d['tokensUsed'] for d in T.values() if isinstance(d.get('tokensUsed'), int))
+        for k in ('days', 'total', 'assigned', 'unassigned', 'breakdown', 'sources', 'tz', 'logStart', 'pflege', 'updatedAt', 'hours'):
+            if k not in mt: B.append(('P10', 'meta', k))
+        if tot != mt['total'] or ass != mt['assigned'] or mt['assigned'] + mt['unassigned'] != mt['total']: B.append(('P10', 'meta', (tot, ass)))
+        pf = mt.get('pflege', {})
+        if pf.get('assigned', 0) + pf.get('unassigned', 0) != pf.get('total'): B.append(('P10', 'pflege', ''))
+        # P25: pflege.assigned ohne k01 – Gegenrechnung aus dem Protokoll
+        msgs, _, _, _ = nachrichten(quellordner())
+        seit = parse(pf['seit'])
+        pm = [(t, u) for t, u in msgs if seit <= t <= parse(mt['updatedAt'])]
+        tasks = {k: {'data': v, 'version': None} for k, v in T.items()}
+        pu, _ = zuordnen(pm, tasks, parse(mt['updatedAt']))
+        if pf.get('total', 0) - pf.get('unassigned', 0) != sum(pu.values()): B.append(('P25', 'meta', (pf.get('total', 0) - pf.get('unassigned', 0), sum(pu.values()))))
+    orders = [d['order'] for d in T.values() if 'order' in d]
+    if len(orders) != len(set(orders)): B.append(('P13', '-', ''))
+    for i, d in T.items():
+        if len(lade_ordner(os.path.join(args.dir, 'tasks', i), 'media')) > 8: B.append(('P12', i, ''))
+    for k, v in akt.items():
+        if not v.get('gesehen') and mt and parse(v['at']) < parse(mt['updatedAt']): B.append(('P23', k, ''))
+    if args.seite:
+        m = re.search(r'fortschritt-vorlage" content="(\d+)', open(args.seite, encoding='utf-8').read())
+        if not m or int(m.group(1)) < 39: B.append(('P11', 'seite', m.group(1) if m else None))
+    print(json.dumps({'auftraege': len([d for d in T.values() if not kompensation(d)]), 'k01': any(kompensation(d) for d in T.values()),
+                      'aktionen': len(akt), 'befunde': B,
+                      'nicht_geprueft': ['P14 (braucht den vorigen Lauf)', 'P17, P19, P20 (im vorliegenden Text nicht definiert)']}, ensure_ascii=False))
+
+
 def dedup(_):
     ordner = quellordner()
     msgs, log_start, roh, usages = nachrichten(ordner)
@@ -264,5 +411,14 @@ if __name__ == '__main__':
     r.add_argument('--versions')
     r.add_argument('--zaehlung', default='')
     r.set_defaults(fn=run)
+    pf = sp.add_parser('postfach')
+    pf.add_argument('--dir', required=True)
+    pf.add_argument('--now')
+    pf.set_defaults(fn=postfach)
+    pr = sp.add_parser('pruefen')
+    pr.add_argument('--dir', required=True)
+    pr.add_argument('--seite')
+    pr.add_argument('--now')
+    pr.set_defaults(fn=pruefen)
     a = p.parse_args()
     a.fn(a)
