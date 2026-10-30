@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """
-Tokenzählung für die Fortschrittsseite (Skill session-fortschritt, Regelwerk Tokens v10, Abschnitt 5 Kurzfassung).
+Tokenzählung für die Fortschrittsseite (Skill session-fortschritt, Abschnitt 5 Kurzfassung; Regelwerk Tokens v11,
+docs/token-regeln.md: Kompensationstask k01).
 
 Python statt tools/tokens.ps1, weil die Cloud-Session kein PowerShell hat. Nur Standardbibliothek,
 keine Geheimnisse, gibt keine Protokollinhalte aus – nur Zählwerte und Zeitstempel.
@@ -118,6 +119,7 @@ def zuordnen(msgs, tasks, now):
         nach[tid] = (ende, min([ende + NACHLAUF_MAX] + grenzen))
     vor = {tid: (created[tid], min(s for s, _ in ss)) for tid, ss in seg.items() if tid in created}
     used = {tid: 0 for tid in seg}
+    rest = []
     for ts, u in msgs:
         n = sum(u.values())
         drin = [(s, num(tid), tid) for tid, ss in seg.items() for s, e in ss if s <= ts < e]
@@ -128,11 +130,18 @@ def zuordnen(msgs, tasks, now):
         kand += [(a, num(tid), tid) for tid, (a, b) in nach.items() if a <= ts < b]
         if kand:
             used[max(kand)[2]] += n
-    return used
+        else:
+            rest.append((ts, n))
+    return used, rest
+
+
+def kompensation(d):
+    return d.get('kind') == 'kompensation'
 
 
 def ausgenommen(d):
-    return 'created = Anlage' in (d.get('note') or '')
+    """Von der Zuordnung ausgenommen: Cloud-Aufträge mit Vermerk „created = Anlage“ und der Kompensationstask."""
+    return 'created = Anlage' in (d.get('note') or '') or kompensation(d)
 
 
 def worked_min(d, now):
@@ -149,8 +158,11 @@ def run(args):
         tid, v = paar.split('=')
         if tid.strip() in tasks:
             tasks[tid.strip()]['version'] = int(v)
-    used = zuordnen(msgs, tasks, now)
+    used, rest = zuordnen(msgs, tasks, now)
     seit = parse(args.seit)
+    # Regelwerk v11 Abschnitt 2: nicht zugeordnete Nachrichten vor dem Stichtag gehen an den Kompensationstask
+    komp = sum(n for ts, n in rest if ts < seit)
+    komp_id = next((tid for tid, t in tasks.items() if kompensation(t['data'])), None)
 
     days, breakdown = {}, {'input': 0, 'cacheCreate': 0, 'cacheRead': 0, 'output': 0}
     for t, u in msgs:
@@ -161,15 +173,20 @@ def run(args):
         breakdown['cacheRead'] += u['cache_read_input_tokens']
         breakdown['output'] += u['output_tokens']
     total = sum(days.values())
-    assigned = sum(used.values())
+    assigned_ohne = sum(used.values())
+    assigned = assigned_ohne + komp
     pf_msgs = [(t, u) for t, u in msgs if t >= seit]
-    pf_used = zuordnen(pf_msgs, tasks, now)
+    pf_used, _ = zuordnen(pf_msgs, tasks, now)
     pf_total = sum(sum(u.values()) for _, u in pf_msgs)
     pf_assigned = sum(pf_used.values())
 
     task_out = {}
     for tid, t in tasks.items():
         d = t['data']
+        if kompensation(d):
+            task_out[tid] = {'version': t['version'], 'fields': {
+                'tokensUsed': komp, 'from': iso(log_start) if log_start else None, 'to': iso(seit)}}
+            continue
         f = {}
         f['tokensUsed'] = used[tid] if tid in used else {'__delete__': True}
         frueh = [s for s, _ in segmente(d, now)] + ([parse(d['created'])] if d.get('created') else [])
@@ -188,11 +205,14 @@ def run(args):
         'pflege': {'seit': iso(seit), 'total': pf_total, 'assigned': pf_assigned, 'unassigned': pf_total - pf_assigned},
         'updatedAt': iso(now),
     }
-    out = {'tasks': task_out, 'meta': meta}
+    out = {'tasks': task_out, 'meta': meta,
+           'kompensation': {'id': komp_id, 'tokensUsed': komp, 'from': meta['logStart'], 'to': iso(seit)},
+           'ohne_kompensation': {'assigned': assigned_ohne, 'unassigned': total - assigned_ohne}}
     text = json.dumps(out, ensure_ascii=False, indent=1)
     if args.out:
         open(args.out, 'w', encoding='utf-8').write(text)
     print(json.dumps({'total': total, 'assigned': assigned, 'unassigned': total - assigned, 'pflege': meta['pflege'],
+                      'kompensation': out['kompensation'], 'ohne_kompensation': out['ohne_kompensation'],
                       'tasks': {k: v['fields'].get('tokensUsed') for k, v in sorted(task_out.items())}}, ensure_ascii=False))
 
 
