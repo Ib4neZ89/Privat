@@ -19,7 +19,8 @@ Aufruf:
   python3 tools/tokens.py postfach --dir <Ordner mit aktionen/*.json> [--now <ISO>]
       Lesepflicht Postfach (Abschnitt 8): ungesehene Einträge auflisten und die Schreibvorgänge
       gesehen = true / gesehenAt = jetzt ausgeben (die Session löscht nie).
-  python3 tools/tokens.py pruefen --dir <Ordner mit tasks/, meta/, aktionen/> --seite <html> [--now <ISO>]
+  python3 tools/tokens.py pruefen --dir <Ordner mit tasks/, meta/, aktionen/> --seite <html> [--vorher <meta/tokens.json des
+      vorigen Laufs>] [--now <ISO>]
       Selbstprüfung nach Skill Abschnitt 6 und Regelwerk Abschnitt 9.
 """
 import argparse
@@ -377,6 +378,18 @@ def pruefen(args):
         tasks = {k: {'data': v, 'version': None} for k, v in T.items()}
         pu, _ = zuordnen(pm, tasks, parse(mt['updatedAt']))
         if pf.get('total', 0) - pf.get('unassigned', 0) != sum(pu.values()): B.append(('P25', 'meta', (pf.get('total', 0) - pf.get('unassigned', 0), sum(pu.values()))))
+    # P17: pflege.seit unverändert gegenüber dem vorigen Lauf
+    if args.vorher and mt:
+        alt = json.load(open(args.vorher, encoding='utf-8'))
+        alt = alt.get('data', alt)
+        if (alt.get('pflege') or {}).get('seit') != (mt.get('pflege') or {}).get('seit'): B.append(('P17', 'meta', ((alt.get('pflege') or {}).get('seit'), mt['pflege'].get('seit'))))
+    # P19: k01 genau dann, wenn meta/zaehlung.seit gesetzt ist – nur wenn seit setAt ein Durchlauf lief
+    if mt and (not z.get('setAt') or parse(mt['updatedAt']) > parse(z['setAt'])):
+        if bool(z.get('seit')) != any(kompensation(d) for d in T.values()): B.append(('P19', 'k01', bool(z.get('seit'))))
+    # P20: Σ hours.t = total und Σ hours.a = assigned
+    if mt and 'hours' in mt:
+        ht = sum(h.get('t', 0) for h in mt['hours'].values()); ha = sum(h.get('a', 0) for h in mt['hours'].values())
+        if ht != mt['total'] or ha != mt['assigned']: B.append(('P20', 'meta', (ht, mt['total'], ha, mt['assigned'])))
     orders = [d['order'] for d in T.values() if 'order' in d]
     if len(orders) != len(set(orders)): B.append(('P13', '-', ''))
     for i, d in T.items():
@@ -388,7 +401,7 @@ def pruefen(args):
         if not m or int(m.group(1)) < 39: B.append(('P11', 'seite', m.group(1) if m else None))
     print(json.dumps({'auftraege': len([d for d in T.values() if not kompensation(d)]), 'k01': any(kompensation(d) for d in T.values()),
                       'aktionen': len(akt), 'befunde': B,
-                      'nicht_geprueft': ['P14 (braucht den vorigen Lauf)', 'P17, P19, P20 (im vorliegenden Text nicht definiert)']}, ensure_ascii=False))
+                      'nicht_geprueft': ['P14 (Vergleich mit dem vorigen Lauf)'] + ([] if args.vorher else ['P17 (ohne --vorher)'])}, ensure_ascii=False))
 
 
 def dedup(_):
@@ -419,6 +432,7 @@ if __name__ == '__main__':
     pr.add_argument('--dir', required=True)
     pr.add_argument('--seite')
     pr.add_argument('--now')
+    pr.add_argument('--vorher')
     pr.set_defaults(fn=pruefen)
     a = p.parse_args()
     a.fn(a)
