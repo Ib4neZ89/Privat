@@ -349,7 +349,7 @@ def pruefen(args):
             if now - letzte > dt.timedelta(days=7) and not any((x.get('name') or '').startswith('Entscheidung') for x in d.get('steps') or []):
                 B.append(('P21', i, ''))
         if d['status'] == 'abgebrochen':
-            if 'abgebrochen:' not in (d.get('note') or '') or not d.get('abortedAt') or any(not s.get('end') for s in d.get('segments') or []) or 'tokensForecast' in d:
+            if 'abgebrochen' not in (d.get('note') or '') or not d.get('abortedAt') or any(not s.get('end') for s in d.get('segments') or []) or 'tokensForecast' in d:
                 B.append(('P24', i, ''))
     cur = st.get('current')
     offen_seg = [i for i, d in T.items() for s in d.get('segments') or [] if not s.get('end')]
