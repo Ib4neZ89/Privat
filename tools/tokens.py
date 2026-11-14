@@ -14,6 +14,7 @@ Aufruf:
       Vollständiger Durchlauf: tokensUsed/tokensPartial/tokensForecast je Auftrag und meta/tokens.
       <Ordner> ist das out_dir eines ArtifactData-list der Sammlung "tasks".
       --versions "t01=5,t02=5,…" übernimmt die Dokumentversionen aus der list-Antwort (für if_version).
+      --archiv <Datei>: Werte gelöschter Protokolle (zuletzt gezählt minus Neuzählung), werden addiert.
       --zaehlung-live '<Dokument meta/zaehlung, wie eben gelesen>' | fehlt  --gelesen <ISO, Zeitpunkt des Lesens>
       Zählbeginn (Abschnitt 2/6): unmittelbar vor dem Aufruf live aus der Datenbank gelesen, nie aus einem Export.
       Ohne gültigen, höchstens 120 s alten Lesewert bricht der Durchlauf ab (Exit 1, keine Ausgabe zum Schreiben).
@@ -262,6 +263,13 @@ def run(args):
             tasks[tid.strip()]['version'] = int(v)
     used, rest = zuordnen(msgs, tasks, now)
     seit = parse(args.seit)
+    A = json.load(open(args.archiv, encoding='utf-8')) if args.archiv else None
+    if A:
+        # Archiv (Regelwerk Abschnitt 6, gelöschte Protokolle): zuletzt gezählt minus Neuzählung, wird addiert
+        for tid, n in A['tasks'].items():
+            if tid in tasks and not kompensation(tasks[tid]['data']):
+                used[tid] = used.get(tid, 0) + n
+        log_start = min(log_start, parse(A['logStart'])) if log_start else parse(A['logStart'])
     # Kompensationstask nur bei gesetztem Zählbeginn: nicht zugeordnete Nachrichten davor gehen an k01
     komp = sum(n for ts, n in rest if zbeginn and ts < zbeginn)
     komp_id = next((tid for tid, t in tasks.items() if kompensation(t['data'])), None)
@@ -274,6 +282,11 @@ def run(args):
         breakdown['cacheCreate'] += u['cache_creation_input_tokens']
         breakdown['cacheRead'] += u['cache_read_input_tokens']
         breakdown['output'] += u['output_tokens']
+    if A:
+        for k, n in A['days'].items():
+            days[k] = days.get(k, 0) + n
+        for k in breakdown:
+            breakdown[k] += A['breakdown'][k]
     total = sum(days.values())
     # Stundensummen {"JJJJ-MM-TTTHH": {t, a}} (Europe/Berlin); a = zugeordnet inkl. Kompensation,
     # damit Σ t = total und Σ a = assigned.
@@ -291,6 +304,12 @@ def run(args):
             offen[(t, n)] -= 1
         else:
             h['a'] += n
+    if A:
+        for k, h in A['hours'].items():
+            z = hours.setdefault(k, {'t': 0, 'a': 0})
+            z['t'] += h['t']
+            z['a'] += h['a']
+        hours = dict(sorted(hours.items()))
     assigned_ohne = sum(used.values())
     assigned = assigned_ohne + komp
     # pflege: nur Nachrichten ≥ seit, ohne Kompensationstask (k01 ist von der Zuordnung ausgenommen)
@@ -298,6 +317,9 @@ def run(args):
     pf_used, pf_rest = zuordnen(pf_msgs, tasks, now)
     pf_total = sum(sum(u.values()) for _, u in pf_msgs)
     pf_assigned = sum(pf_used.values())
+    if A:
+        pf_total += A['pflege']['total']
+        pf_assigned += A['pflege']['assigned']
     stabil_ab = stabil(pf_msgs, pf_rest, seit, now)
 
     task_out = {}
@@ -443,7 +465,8 @@ def pruefen(args):
         pm = [(t, u) for t, u in msgs if seit <= t <= parse(mt['updatedAt'])]
         tasks = {k: {'data': v, 'version': None} for k, v in T.items()}
         pu, _ = zuordnen(pm, tasks, parse(mt['updatedAt']))
-        if pf.get('total', 0) - pf.get('unassigned', 0) != sum(pu.values()): B.append(('P25', 'meta', (pf.get('total', 0) - pf.get('unassigned', 0), sum(pu.values()))))
+        pa = json.load(open(args.archiv, encoding='utf-8'))['pflege']['assigned'] if args.archiv else 0
+        if pf.get('total', 0) - pf.get('unassigned', 0) != sum(pu.values()) + pa: B.append(('P25', 'meta', (pf.get('total', 0) - pf.get('unassigned', 0), sum(pu.values()))))
         # Prüfzeitraum (Abschnitt 9): ab meta/zaehlung.seit, ohne Zählbeginn ab pflege.seit; davor ist Kompensation
         ab = parse(z['seit']) if z.get('seit') else seit
         bis = parse(mt['updatedAt'])
@@ -519,6 +542,7 @@ if __name__ == '__main__':
     r.add_argument('--out')
     r.add_argument('--versions')
     r.add_argument('--zaehlung-live', required=True)
+    r.add_argument('--archiv')
     r.add_argument('--gelesen', required=True)
     r.set_defaults(fn=run)
     pf = sp.add_parser('postfach')
@@ -530,6 +554,7 @@ if __name__ == '__main__':
     pr.add_argument('--seite')
     pr.add_argument('--now')
     pr.add_argument('--vorher')
+    pr.add_argument('--archiv')
     pr.set_defaults(fn=pruefen)
     a = p.parse_args()
     a.fn(a)
