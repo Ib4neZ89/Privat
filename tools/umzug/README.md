@@ -43,6 +43,28 @@ geplante-aufgaben/    geplante Aufgaben (unverändert)
 
 Je Chat oder Session: `verlauf.md`, wenn vorhanden `zusammenfassung.md`, `anhaenge/` (nur als Text), `fehlende-dateien.txt` (im Export nur dem Namen nach) und `startprompt.txt` für die Fortsetzung im neuen Konto.
 
+## Übertragung ins neue Konto
+
+Jeder Lauf schreibt zusätzlich den Ordner `uebertragung/`:
+
+```
+LIES-MICH.md          die drei Schritte im neuen Konto
+auswahl.csv           alle Kandidaten; Spalte "anlegen" (ja/nein) in Excel bearbeiten
+sessions.json         die mit "ja" markierten Sitzungen samt Startkontext
+IMPORT-PROMPT.md      Auftrag für eine Code-Session im neuen Konto, die sessions.json abarbeitet
+projekte/<Name>/      flacher Ordner je Projekt zum Hochladen ins Projektwissen
+```
+
+Ablauf: Tool starten, `auswahl.csv` bearbeiten, Tool mit `--auswahl <Datei>` erneut starten. Im neuen Konto die Projekte von Hand anlegen und die Ordner hochladen; für die Sitzungen eine Code-Session öffnen, `sessions.json` hochladen und `IMPORT-PROMPT.md` als Auftrag geben.
+
+Weitere Parameter:
+
+- `--auswahl <auswahl.csv>`: übernimmt die bearbeitete Spalte `anlegen`. Ohne die Datei gilt `ja` für alles, dessen letzte Aktivität höchstens 30 Tage vor dem jüngsten Eintrag liegt.
+- `--cloud-sessions <Datei.json>`: Liste der Cloud-Sessions des alten Kontos, die nicht im Export stehen. Format: `[{"id", "art", "titel", "repo", "zweig", "erstellt", "geaendert", "stand", "hinweis"}]`. Die Liste erzeugt eine Session im alten Konto.
+- `--einbetten <Zeichen>`: so viel Verlauf steht höchstens im Startkontext einer Sitzung (Vorgabe 40000); längere Verläufe werden in der Mitte gekürzt.
+
+Geprüft am 24.11.2026: Eine Code-Session mit Repo und Zweig und eine Sitzung ohne Repo mit eingebettetem Stand ließen sich per Werkzeug anlegen. Nicht geprüft: Anlegen ohne Startnachricht (nur Systemkontext), Anlegen in Ordnern auf einem PC (Remote Control), Cowork-Sitzungen. Klassische Chats und Projekte in claude.ai kann kein Werkzeug anlegen.
+
 ## Grenzen
 
 - Hochgeladene Originaldateien und Bilder stehen nicht im Export.
