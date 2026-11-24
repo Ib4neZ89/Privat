@@ -44,7 +44,7 @@ Stand: 24.11.2026. Geschrieben von der bisherigen Claude-Code-Session (Cloud) f�
 - Auf der Fortschrittsseite **keine Personennamen** – dort heißt Phillip „Benutzer“.
 - Teilschritte sofort abhaken, nie gesammelt am Ende; Bericht erst nach Selbstprüfung.
 - Schätzungen realistisch im eigenen Tempo, ohne Puffer (Entscheidung 14.11.2026).
-- Prognose der Dauer: Prüfintervall nach aktueller Prognose, Regel aus Schritten und Arbeitszeit (Entscheidung 14.11.2026; Details lagen im alten Skill).
+- Prognose der Dauer (Entscheidung 14.11.2026, so in der Seitenvorlage 59 beschrieben): Die erste Schätzung bleibt als Bezug erhalten. Geprüft wird nach gearbeiteten Minuten im Abstand nach der aktuellen Prognose: unter 10 min Dauer ÷ 4, bis 15 min alle 3, bis 60 min alle 10, bis 4 h alle 30, bis 8 h alle 60 min, bis 24 h alle 3 h, bis 2 Tage alle 6 h, darüber alle 12 h. Neue Dauer = gearbeitete Minuten × Schritte gesamt ÷ erledigte Schritte; ohne erledigten Schritt, aber über dem Anteil des ersten Schritts: gearbeitet + Anteil der übrigen Schritte; sonst über der Prognose: gearbeitet + ein Intervall. Unter 10 % Abstand gilt als gleich. Anzeige: aktuelle Prognose, dahinter die erste in Klammern (rot, wenn darüber; grün, wenn darunter); ebenso für Tokens.
 - Balkenfarbe auf der Seite: blau läuft, grün fertig, orange pausiert/Schätzung überschritten, rot abgebrochen/blockiert (Entscheidung 14.11.2026).
 - Abgebrochene Aufträge chronologisch einsortiert wie alle anderen (30.10.2026).
 - Zählbeginn auf der Seite: von Phillip am 31.10.2026 auf „ab Beginn“ zurückgesetzt (kein Kompensationstask k01 mehr).
@@ -65,8 +65,9 @@ Stand: 24.11.2026. Geschrieben von der bisherigen Claude-Code-Session (Cloud) f�
 - **Prüfschleifen:** Status „Prüfung“, Durchgänge zählen; kleine Prüfungen ≤ 10 min, große ≤ 30 min; vor jedem Bericht Selbstprüfung (Befunde beheben, „nicht geprüft“ nennen).
 - **Release der App:** bei jeder Änderung an der App `VERSION` in `sw.js` **und** `APP_VERSION` in `app.js` gemeinsam erhöhen (Test prüft die Gleichheit), sonst sieht niemand das Update. `npm test` muss grün sein. Nach dem Push baut GitHub Pages automatisch neu.
 - **Commits:** deutsche, beschreibende Commit-Texte (Betreff = was sich ändert). Keine Modellbezeichnung in Commits, Code oder Doku. Bisher mit Fußzeile `Co-Authored-By: Claude …` und Session-Link (im neuen Konto die dort vorgegebene Fußzeile verwenden).
+- **Push:** In diesem Projekt war Commit und Push auf den Branch nach jedem Auftrag üblich und von Phillip so beauftragt („Committen“, „commit and push“); es gibt kein Push-Verbot. Pull Requests, Merges, Löschen nur auf ausdrücklichen Auftrag.
 - **Branch:** alles auf `claude/wizardly-cannon-5b0wz2` (das ist auch die Pages-Quelle). Push mit `git push -u origin claude/wizardly-cannon-5b0wz2`. Keine Pull Requests ohne ausdrücklichen Auftrag.
-- Tokenzählung des Projekts: `tools/tokens.py` (nur Python-Standardbibliothek), Regelwerk `docs/token-regeln.md`, Archiv verlorener Protokolle `docs/token-archiv.json` (zuletzt gezählte Werte bis 31.10.2026 minus Neuzählung; Feld `unassigned` = früherer k01-Anteil). Aufruf und Parameter stehen im Kopf von `tools/tokens.py` (`run`, `pruefen`, `dedup`, `postfach`). Im neuen Konto nur nötig, wenn dort wieder eine Fortschrittsseite geführt wird; die Protokolle des alten Kontos fehlen dort, eine neue Seite beginnt mit eigener Zählung.
+- Tokenzählung des Projekts: `tools/tokens.py` (nur Python-Standardbibliothek), Regelwerk `docs/token-regeln.md`, Archiv verlorener Protokolle `docs/token-archiv.json` (zuletzt gezählte Werte bis 31.10.2026 minus Neuzählung; Feld `unassigned` = früherer k01-Anteil). Aufruf und Parameter stehen im Kopf von `tools/tokens.py` (`run`, `pruefen`, `dedup`, `postfach`). `docs/token-regeln.md` beschreibt im Kontext eine Windows/PowerShell-Session; in der Cloud lief stattdessen `tools/tokens.py` mit derselben Logik. Im neuen Konto nur nötig, wenn dort wieder eine Fortschrittsseite geführt wird; die Protokolle des alten Kontos fehlen dort, eine neue Seite beginnt mit eigener Zählung.
 
 ## 5. Einrichtung
 
@@ -99,8 +100,8 @@ Stand: 24.11.2026. Geschrieben von der bisherigen Claude-Code-Session (Cloud) f�
 ```
 Du übernimmst das Projekt „Abrechnung“ (Repo Ib4neZ89/Privat, Branch claude/wizardly-cannon-5b0wz2) aus Phillips altem Claude-Konto. Verlauf, Skills und Artifacts von dort gibt es hier nicht.
 
-1. Lies zuerst UEBERGABE-UMZUG.md vollständig, dann README.md und CLAUDE.md. Die Regeln und Entscheidungen in UEBERGABE-UMZUG.md Abschnitt 3 gelten weiter, solange Phillip nichts anderes sagt.
-2. Prüfe den Stand: git status, git log -5, npm test (muss grün sein). Melde App-Version (APP_VERSION in app.js = VERSION in sw.js) und ob GitHub-Zugriff zum Pushen besteht.
+1. Lies zuerst UEBERGABE-UMZUG.md vollständig, dann README.md und CLAUDE.md. CLAUDE.md verweist noch auf Skill und Fortschrittsseite des alten Kontos – beides gibt es hier nicht. Die Produktentscheidungen (Abschnitt 3.1) und Konventionen (Abschnitt 4) gelten weiter. Die Tracking-Regeln (3.2) befolgst du nur sinngemäß im Bericht, bis Phillip über eine neue Fortschrittsseite entscheidet; die Skill-Master-Ausnahme (3.3) gilt erst nach seiner Bestätigung.
+2. Prüfe den Stand: git status, git log -5, npm test (muss grün sein). Melde App-Version (APP_VERSION in app.js = VERSION in sw.js) und ob GitHub-Zugriff zum Pushen besteht (z. B. `git push --dry-run origin claude/wizardly-cannon-5b0wz2`).
 3. Frag Phillip zu den offenen Punkten aus Abschnitt 2 (Remote Control; ob die Regel zu Nachrichten anderer Sessions weiter gilt; ob wieder eine Fortschrittsseite geführt werden soll).
-4. Beginne keine Änderung ohne Auftrag. Bei App-Änderungen: VERSION in sw.js und APP_VERSION in app.js gemeinsam erhöhen, npm test, deutsch committen, auf den Branch pushen.
+4. Beginne keine Änderung ohne Auftrag. Bei App-Änderungen: VERSION in sw.js und APP_VERSION in app.js gemeinsam erhöhen, npm test, deutsch committen, auf den Branch pushen (so war es bisher üblich; ändert Phillip das, gilt seine Ansage). CLAUDE.md erst anpassen, wenn Phillip über die Fortschrittsseite entschieden hat.
 ```
