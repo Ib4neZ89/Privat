@@ -90,5 +90,6 @@
  "pflege": {
   "total": 113850601,
   "assigned": 113850601
- }
+ },
+ "unassigned": 3176654
 }
