@@ -95,9 +95,12 @@ def schreibe(pfad, text):
 def eindeutig(ordner, name):
     """Hängt -2, -3 … an, wenn es den Unterordner schon gibt."""
     kandidat, n = name, 1
+    stamm, endung = os.path.splitext(name)
+    if len(endung) > 6 or " " in endung:
+        stamm, endung = name, ""
     while os.path.exists(os.path.join(ordner, kandidat)):
         n += 1
-        kandidat = "%s-%d" % (name, n)
+        kandidat = "%s-%d%s" % (stamm, n, endung)
     return os.path.join(ordner, kandidat)
 
 
@@ -516,8 +519,23 @@ def schreibe_uebertragung(ziel, a, kand, projekte, pfad_projekt, speicher, hinwe
             for wurzel, _, dateien in os.walk(eigene[name]):
                 for d in sorted(dateien):
                     os.makedirs(zielp, exist_ok=True)
-                    shutil.copy2(os.path.join(wurzel, d),
-                                 eindeutig(zielp, "Zusammenfassung " + sicher(d, 110)))
+                    quelle = os.path.join(wurzel, d)
+                    if d.lower().endswith(".zip"):
+                        # Gepackte Zusammenfassungen einzeln ablegen, damit sie ins Projektwissen passen
+                        try:
+                            with zipfile.ZipFile(quelle) as z:
+                                for glied in z.infolist():
+                                    if glied.is_dir():
+                                        continue
+                                    kurz = os.path.basename(glied.filename.replace("\\", "/"))
+                                    with z.open(glied) as ein, open(eindeutig(
+                                            zielp, "Zusammenfassung " + sicher(kurz, 110)), "wb") as aus:
+                                        shutil.copyfileobj(ein, aus)
+                                    eigene_dateien += 1
+                        except zipfile.BadZipFile:
+                            hinweise.append("ZIP mit Zusammenfassungen nicht lesbar: %s" % d)
+                        continue
+                    shutil.copy2(quelle, eindeutig(zielp, "Zusammenfassung " + sicher(d, 110)))
                     eigene_dateien += 1
         for k in zugehoerig:
             ablage = zielp if a.projektwissen == "voll" else os.path.join(zielp, "Verlaeufe - nur bei Bedarf")
