@@ -546,19 +546,34 @@ def main():
         ordner = export_bereitstellen(a.export, arbeit)
         gesehen = set()  # dieselbe ZIP-Datei kann doppelt im Ordner liegen
         for pfad in finde(ordner, unterordner="projects"):
-            pr = lade(pfad)
+            try:
+                pr = lade(pfad)
+            except (ValueError, OSError):
+                continue
+            # Nur echte Projektdateien des Exports; im selben Ordner kann auch eine Kopie von
+            # .claude\projects liegen, deren JSON-Dateien keine Projekte sind.
+            if not (isinstance(pr, dict) and pr.get("uuid") and "name" in pr
+                    and ("docs" in pr or "prompt_template" in pr)):
+                continue
             if pr.get("uuid") not in gesehen:
                 gesehen.add(pr.get("uuid"))
                 projekte.append(pr)
         for pfad in finde(ordner, dateiname="conversations.json"):
-            for c in lade(pfad):
+            inhalt = lade(pfad)
+            if not isinstance(inhalt, list):
+                continue
+            for c in inhalt:
+                if not (isinstance(c, dict) and "chat_messages" in c):
+                    continue
                 if c.get("uuid") in gesehen:
                     continue
                 gesehen.add(c.get("uuid"))
                 chats.append({"roh": c, "titel": c.get("name") or "", "projekt": None,
                               "von": tag(c.get("created_at")), "bis": tag(c.get("updated_at"))})
         for pfad in finde(ordner, unterordner="memories"):
-            speicher = lade(pfad)
+            inhalt = lade(pfad)
+            if isinstance(inhalt, dict) and ("conversations_memory" in inhalt or "project_memories" in inhalt):
+                speicher = inhalt
         if not chats:
             hinweise.append("Im Export wurde keine conversations.json gefunden.")
     else:
