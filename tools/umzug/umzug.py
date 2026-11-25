@@ -361,8 +361,11 @@ jüngsten Eintrag liegt. Nach dem Ändern das Tool noch einmal mit `--auswahl <d
 
 ## 2. Projekte (von Hand, je Projekt wenige Minuten)
 Je Ordner unter `projekte/`: im neuen Konto ein Projekt mit demselben Namen anlegen, den Text aus
-`00 Projektanweisungen.txt` in die Anweisungen kopieren, alle übrigen Dateien des Ordners in das
-Projektwissen ziehen. Jeder neue Chat in diesem Projekt kennt dann den alten Stand.
+`00 Projektanweisungen.txt` in die Anweisungen kopieren, die übrigen Dateien der obersten Ebene in das
+Projektwissen ziehen. Jeder neue Chat in diesem Projekt kennt dann den alten Stand aus den
+Zusammenfassungen. Eigene Zusammenfassungen (z. B. PDF je Chat, Projektkontext) gehören ebenfalls
+dorthin. Der Unterordner `Verlaeufe - nur bei Bedarf` enthält die vollständigen Verläufe: nicht
+hochladen, sondern den einzelnen Verlauf an einen neuen Chat hängen, wenn genau dieser fortgesetzt wird.
 
 ## 3. Sitzungen (automatisch)
 Im neuen Konto eine Code-Session öffnen, `sessions.json` hochladen und den Text aus
@@ -487,7 +490,8 @@ def schreibe_uebertragung(ziel, a, kand, projekte, pfad_projekt, speicher, hinwe
             schreibe(os.path.join(zielp, "Wissen " + sicher((d.get("filename") or "datei").replace("/", "_"), 110)),
                      d.get("content") or "")
         for k in zugehoerig:
-            datei = eindeutig(zielp, "Chat %s %s.md" % (k["zeile"][3], sicher(k["zeile"][1], 70)))
+            ablage = zielp if a.projektwissen == "voll" else os.path.join(zielp, "Verlaeufe - nur bei Bedarf")
+            datei = eindeutig(ablage, "Chat %s %s.md" % (k["zeile"][3], sicher(k["zeile"][1], 70)))
             schreibe(datei, k["verlauf"])
     if not sessions:
         hinweise.append("Keine Sitzung zum Anlegen markiert (uebertragung/auswahl.csv prüfen).")
@@ -507,6 +511,9 @@ def main():
     p.add_argument("--cloud-sessions", help="JSON-Liste der Cloud- und Remote-Sessions des alten Kontos")
     p.add_argument("--einbetten", type=int, default=40000,
                    help="so viele Zeichen des Verlaufs höchstens in den Startkontext einbetten (Vorgabe 40000)")
+    p.add_argument("--projektwissen", choices=["kurz", "voll"], default="kurz",
+                   help="Hochlade-Ordner je Projekt: kurz = Stand, Gedächtnis, Wissensdateien; die Verläufe "
+                        "liegen im Unterordner 'Verlaeufe - nur bei Bedarf' (Vorgabe). voll = alles flach.")
     p.add_argument("--werkzeuge", choices=["kurz", "voll", "aus"], default="kurz",
                    help="Werkzeugaufrufe im Verlauf: gekürzt (Vorgabe), vollständig oder weglassen")
     a = p.parse_args()

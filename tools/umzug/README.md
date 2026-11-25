@@ -61,6 +61,7 @@ Weitere Parameter:
 
 - `--auswahl <auswahl.csv>`: übernimmt die bearbeitete Spalte `anlegen`. Ohne die Datei gilt `ja` für alles, dessen letzte Aktivität höchstens 30 Tage vor dem jüngsten Eintrag liegt.
 - `--cloud-sessions <Datei.json>`: Liste der Cloud-Sessions des alten Kontos, die nicht im Export stehen. Format: `[{"id", "art", "titel", "repo", "zweig", "erstellt", "geaendert", "stand", "hinweis"}]`. Die Liste erzeugt eine Session im alten Konto.
+- `--projektwissen kurz|voll`: `kurz` (Vorgabe) legt in den Hochlade-Ordner je Projekt nur Stand, Gedächtnis und Wissensdateien; die vollständigen Verläufe liegen im Unterordner `Verlaeufe - nur bei Bedarf`, damit das Projektwissen klein bleibt. `voll` legt alles flach ab.
 - `--einbetten <Zeichen>`: so viel Verlauf steht höchstens im Startkontext einer Sitzung (Vorgabe 40000); längere Verläufe werden in der Mitte gekürzt.
 
 Geprüft am 24.11.2026: Eine Code-Session mit Repo und Zweig und eine Sitzung ohne Repo mit eingebettetem Stand ließen sich per Werkzeug anlegen. Nicht geprüft: Anlegen ohne Startnachricht (nur Systemkontext), Anlegen in Ordnern auf einem PC (Remote Control), Cowork-Sitzungen. Klassische Chats und Projekte in claude.ai kann kein Werkzeug anlegen.
