@@ -462,6 +462,29 @@ def schreibe_uebertragung(ziel, a, kand, projekte, pfad_projekt, speicher, hinwe
     schreibe(os.path.join(basis, "IMPORT-PROMPT.md"), IMPORT_PROMPT)
     schreibe(os.path.join(basis, "LIES-MICH.md"), LIES_MICH)
 
+    # Eigene Zusammenfassungen des Benutzers: je Projekt ein Unterordner, Zuordnung über den Namen.
+    # Ordnernamen dürfen abweichen, wo Windows ein Zeichen nicht erlaubt (z. B. "u" statt "&").
+    eigene, eigene_dateien = {}, 0
+    if a.pdf_ordner:
+        namen = {norm(pr.get("name") or ""): pr.get("name") for pr in projekte}
+        for eintrag in sorted(os.listdir(a.pdf_ordner)):
+            voll = os.path.join(a.pdf_ordner, eintrag)
+            if not os.path.isdir(voll):
+                continue
+            schluessel = norm(eintrag)
+            treffer = namen.get(schluessel)
+            if not treffer:
+                ohne = lambda t: " ".join(w for w in t.split() if w not in ("u", "und", "and"))
+                kandidaten = [n for k, n in namen.items() if ohne(k) == ohne(schluessel)]
+                if not kandidaten:
+                    nah = difflib.get_close_matches(schluessel, list(namen), 1, 0.85)
+                    kandidaten = [namen[nah[0]]] if nah else []
+                treffer = kandidaten[0] if kandidaten else None
+            if treffer:
+                eigene[treffer] = voll
+            else:
+                hinweise.append("Ordner mit Zusammenfassungen passt zu keinem Projekt: %s" % eintrag)
+
     # Hochlade-Ordner je Projekt: flach, damit alles in einem Zug ins Projektwissen gezogen werden kann
     anzahl_projekte = 0
     for pr in projekte:
@@ -470,7 +493,7 @@ def schreibe_uebertragung(ziel, a, kand, projekte, pfad_projekt, speicher, hinwe
         zugehoerig = [k for k in kand if k["zeile"][2] == name and k["zeile"][0] in ("Chat", "Cowork lokal")]
         docs = pr.get("docs") or []
         memo = (speicher.get("project_memories") or {}).get(pr.get("uuid"))
-        if not (zugehoerig or docs or memo or pr.get("prompt_template")):
+        if not (zugehoerig or docs or memo or pr.get("prompt_template") or name in eigene):
             continue
         anzahl_projekte += 1
         zielp = os.path.join(basis, "projekte", sicher(name))
@@ -489,13 +512,21 @@ def schreibe_uebertragung(ziel, a, kand, projekte, pfad_projekt, speicher, hinwe
         for d in docs:
             schreibe(os.path.join(zielp, "Wissen " + sicher((d.get("filename") or "datei").replace("/", "_"), 110)),
                      d.get("content") or "")
+        if name in eigene:
+            for wurzel, _, dateien in os.walk(eigene[name]):
+                for d in sorted(dateien):
+                    os.makedirs(zielp, exist_ok=True)
+                    shutil.copy2(os.path.join(wurzel, d),
+                                 eindeutig(zielp, "Zusammenfassung " + sicher(d, 110)))
+                    eigene_dateien += 1
         for k in zugehoerig:
             ablage = zielp if a.projektwissen == "voll" else os.path.join(zielp, "Verlaeufe - nur bei Bedarf")
             datei = eindeutig(ablage, "Chat %s %s.md" % (k["zeile"][3], sicher(k["zeile"][1], 70)))
             schreibe(datei, k["verlauf"])
     if not sessions:
         hinweise.append("Keine Sitzung zum Anlegen markiert (uebertragung/auswahl.csv prüfen).")
-    return {"kandidaten": len(kand), "anlegen": len(sessions), "projekte": anzahl_projekte}
+    return {"kandidaten": len(kand), "anlegen": len(sessions), "projekte": anzahl_projekte,
+            "eigene_ordner": len(eigene), "eigene_dateien": eigene_dateien}
 
 
 # ------------------------------------------------------------------ Hauptlauf
@@ -511,6 +542,9 @@ def main():
     p.add_argument("--cloud-sessions", help="JSON-Liste der Cloud- und Remote-Sessions des alten Kontos")
     p.add_argument("--einbetten", type=int, default=40000,
                    help="so viele Zeichen des Verlaufs höchstens in den Startkontext einbetten (Vorgabe 40000)")
+    p.add_argument("--pdf-ordner", help="Ordner mit eigenen Zusammenfassungen: je Projekt ein Unterordner mit "
+                                        "Dateien (z. B. PDF je Chat, Projektkontext). Sie kommen in den "
+                                        "Hochlade-Ordner des Projekts.")
     p.add_argument("--projektwissen", choices=["kurz", "voll"], default="kurz",
                    help="Hochlade-Ordner je Projekt: kurz = Stand, Gedächtnis, Wissensdateien; die Verläufe "
                         "liegen im Unterordner 'Verlaeufe - nur bei Bedarf' (Vorgabe). voll = alles flach.")
@@ -527,6 +561,7 @@ def main():
     a.export = lang(a.export)
     a.cowork = [lang(q) for q in a.cowork]
     a.code = [lang(q) for q in a.code]
+    a.pdf_ordner = lang(a.pdf_ordner)
     marke = os.path.join(ziel, ".umzug-sicherung")
     if os.path.isdir(ziel) and os.listdir(ziel) and not os.path.exists(marke):
         sys.exit("Zielordner ist nicht leer und stammt nicht von diesem Tool: %s" % ziel)
@@ -765,6 +800,8 @@ def main():
     bericht += ["", "## Übertragung (Ordner uebertragung)", "",
                 "- Kandidaten für neue Sitzungen: %d, davon zum Anlegen markiert: %d" % (ueb["kandidaten"], ueb["anlegen"]),
                 "- Hochlade-Ordner für Projekte: %d" % ueb["projekte"],
+                "- Eigene Zusammenfassungen übernommen: %d Dateien aus %d Projektordnern" % (
+                    ueb["eigene_dateien"], ueb["eigene_ordner"]),
                 "- Auswahl ändern: uebertragung/auswahl.csv bearbeiten (Spalte anlegen: ja/nein), dann mit --auswahl neu starten"]
     if hinweise:
         bericht += ["", "## Hinweise", ""] + ["- " + h for h in hinweise]

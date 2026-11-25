@@ -61,6 +61,7 @@ Weitere Parameter:
 
 - `--auswahl <auswahl.csv>`: übernimmt die bearbeitete Spalte `anlegen`. Ohne die Datei gilt `ja` für alles, dessen letzte Aktivität höchstens 30 Tage vor dem jüngsten Eintrag liegt.
 - `--cloud-sessions <Datei.json>`: Liste der Cloud-Sessions des alten Kontos, die nicht im Export stehen. Format: `[{"id", "art", "titel", "repo", "zweig", "erstellt", "geaendert", "stand", "hinweis"}]`. Die Liste erzeugt eine Session im alten Konto.
+- `--pdf-ordner <Ordner>`: eigene Zusammenfassungen, je Projekt ein Unterordner mit Dateien (zum Beispiel ein PDF je Chat und ein Projektkontext). Die Dateien landen mit dem Vorsatz „Zusammenfassung“ im Hochlade-Ordner des Projekts. Der Ordnername darf vom Projektnamen abweichen, wo Windows ein Zeichen nicht erlaubt („Phishing u Co“ für „Phishing & Co“). Ordner ohne passendes Projekt stehen im Bericht unter Hinweise.
 - `--projektwissen kurz|voll`: `kurz` (Vorgabe) legt in den Hochlade-Ordner je Projekt nur Stand, Gedächtnis und Wissensdateien; die vollständigen Verläufe liegen im Unterordner `Verlaeufe - nur bei Bedarf`, damit das Projektwissen klein bleibt. `voll` legt alles flach ab.
 - `--einbetten <Zeichen>`: so viel Verlauf steht höchstens im Startkontext einer Sitzung (Vorgabe 40000); längere Verläufe werden in der Mitte gekürzt.
 
