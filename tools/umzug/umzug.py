@@ -31,6 +31,7 @@ import json
 import os
 import re
 import shutil
+import stat
 import sys
 import zipfile
 
@@ -44,6 +45,34 @@ Der frühere Verlauf liegt als Datei vor, der Verlauf selbst ist hier nicht vorh
 Titel der früheren Unterhaltung: {titel}
 Zeitraum: {von} bis {bis}
 """
+
+
+def lang(pfad):
+    """Unter Windows die Langpfad-Form (\\\\?\\...), damit Pfade über 260 Zeichen lesbar sind.
+    Die Verläufe lokaler Cowork-Sitzungen liegen so tief, dass os.walk sie sonst still übergeht."""
+    if os.name != "nt" or not pfad:
+        return pfad
+    pfad = os.path.abspath(pfad)
+    if pfad.startswith("\\\\?\\"):
+        return pfad
+    if pfad.startswith("\\\\"):
+        return "\\\\?\\UNC\\" + pfad[2:]
+    return "\\\\?\\" + pfad
+
+
+def entferne(pfad, ignorieren=False):
+    """shutil.rmtree, das unter Windows auch schreibgeschützte Dateien löscht."""
+    def schreibbar(funktion, p, _):
+        try:
+            os.chmod(p, stat.S_IWRITE)
+            funktion(p)
+        except OSError:
+            if not ignorieren:
+                raise
+    if sys.version_info >= (3, 12):
+        shutil.rmtree(pfad, onexc=schreibbar)
+    else:
+        shutil.rmtree(pfad, onerror=schreibbar)
 
 
 def sicher(name, laenge=80):
@@ -487,11 +516,15 @@ def main():
     for quelle in [a.export] + a.cowork + a.code:
         if quelle and os.path.abspath(quelle).startswith(ziel + os.sep):
             sys.exit("Eine Quelle liegt im Zielordner: %s" % quelle)
+    ziel = lang(ziel)
+    a.export = lang(a.export)
+    a.cowork = [lang(q) for q in a.cowork]
+    a.code = [lang(q) for q in a.code]
     marke = os.path.join(ziel, ".umzug-sicherung")
     if os.path.isdir(ziel) and os.listdir(ziel) and not os.path.exists(marke):
         sys.exit("Zielordner ist nicht leer und stammt nicht von diesem Tool: %s" % ziel)
     if os.path.isdir(ziel):
-        shutil.rmtree(ziel)
+        entferne(ziel)
     os.makedirs(ziel)
     schreibe(marke, "Angelegt von umzug.py am %s\n" % datetime.datetime.now().isoformat(timespec="seconds"))
 
@@ -714,7 +747,8 @@ def main():
     if hinweise:
         bericht += ["", "## Hinweise", ""] + ["- " + h for h in hinweise]
     schreibe(os.path.join(ziel, "BERICHT.md"), "\n".join(bericht) + "\n")
-    shutil.rmtree(os.path.join(ziel, "_entpackt"), ignore_errors=True)
+    if os.path.isdir(os.path.join(ziel, "_entpackt")):
+        entferne(os.path.join(ziel, "_entpackt"), ignorieren=True)
     print("\n".join(bericht))
 
 
