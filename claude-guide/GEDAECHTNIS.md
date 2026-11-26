@@ -10,6 +10,7 @@ Von der Session gepflegt (Regel R8). Nur Belegtes, mit Datum und Quelle. Zu Begi
 - Erwartet, dass Vorgaben wie ein Sessionname sofort sichtbar übernommen werden; die Begründung für ein Abweichen gleich mitliefern. (26.11.2026, Nachfrage zum Sessionnamen)
 
 ## Arbeitsweise und Werte
+- Parkt neue Aufträge in der Session, um sie aus dem Kopf zu haben; Reihenfolge: erst offene Rückfragen klären und laufende Aufträge abschließen, dann den geparkten Auftrag beginnen, erst auf Zeichen des Benutzers. (26.11.2026, Chat)
 - Evidenzbasiert, nur geprüfte Informationen; Kosten/Nutzen beim Tokenverbrauch beachten, teuer ist erlaubt, wenn es Mehrwert bringt. (26.11.2026)
 - Fortschrittstracking (Skill session-fortschritt) hat für den Benutzer sehr hohen Wert, Kosten gerechtfertigt. (26.11.2026)
 - Will Wissen über Claude dauerhaft gesammelt sehen (Wissensdatenbank) und den eigenen Workflow laufend verbessern. (26.11.2026)
