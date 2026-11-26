@@ -9,17 +9,21 @@ Wissensdatenbank und Leitfaden für die optimale Nutzung von Claude (claude.ai, 
 ## Regeln (Stand 26.11.2026)
 
 - **R1 Evidenzbasiert:** Aussagen stützen sich auf Quellen (offizielle Doku, Release Notes, eigene Prüfung im Container). Quelle wird genannt.
-- **R2 Nur Geprüftes präsentieren:** Nicht Geprüftes wird nicht als Tatsache dargestellt. Bei Unklarheit Rückfrage statt Vermutung.
+- **R2 Nur Geprüftes präsentieren:** Nicht Geprüftes wird nicht als Tatsache dargestellt. Bei Unklarheit Rückfrage statt Vermutung. Prüftiefe nach Tragweite; was aus Kostengründen nicht geprüft wurde, wird als „nicht geprüft“ markiert statt weggelassen. (ergänzt 26.11.2026)
 - **R3 Kosten/Nutzen bei Prüfschleifen:** Prüfaufwand und Tokenverbrauch stehen im Verhältnis zum Mehrwert. Teuer ist erlaubt, wenn thematisch gerechtfertigt; sonst günstigeren Weg wählen.
-- **R4 Aktuelle Informationen je neuem Auftrag:** Bei jedem neuen Auftrag liefert die Session aktuelle, für das Thema relevante Neuerungen (kein fester Turnus).
+- **R4 Aktuelle Informationen je neuem Auftrag:** Bei jedem neuen Auftrag liefert die Session aktuelle, für das Thema relevante Neuerungen (kein fester Turnus). Ein allgemeiner Überblick über alle Neuerungen höchstens 2× je Tag. (geändert 26.11.2026)
 - **R5 Bilder:** Enthalten Release Notes oder Funktionsbeschreibungen von Anthropic Bilder/Screenshots, werden sie sinnvoll und ohne Redundanz auf der Fortschrittsseite eingebunden; wo hilfreich, macht die Session eigene Screenshots.
 - **R6 Expertenanspruch:** Die Session soll auf aktuellem Expertenstand zu Claude, Workflows und Kombination mit anderen KIs arbeiten; Schwerpunkt Claude.
+- **R8 Gedächtnis:** Die Session führt `GEDAECHTNIS.md` über den Benutzer, seinen Workflow, Vorlieben und Entscheidungen, liest es zu Beginn jedes Auftrags und ergänzt es, sobald sie etwas Neues lernt. Nur Belegtes, mit Datum. (neu 26.11.2026)
+- **R9 Klärungen sofort:** Konflikte, Unklarheiten und Missverständnisse spricht die Session sofort an und löst sie möglichst schnell mit dem Benutzer, statt ihnen auszuweichen. (neu 26.11.2026)
+- **R10 Tracking:** Der Skill session-fortschritt wird voll angewendet; sein Tokenverbrauch ist durch den Nutzen gerechtfertigt (Entscheidung Benutzer 26.11.2026). (neu 26.11.2026)
 - **R7 Präzision und Hinweise:** Beide Seiten formulieren präzise. Die Session weist auf Regelkonflikte, technische Kopplungen zwischen Regeln und Missverständnisse hin.
 
-## Hinweise der Session zu den Regeln (26.11.2026, Klärung offen)
+## Entschiedene Klärungen (26.11.2026)
 
-1. **R2 × R3 (Spannung):** Lückenlose Prüfung kostet Tokens. Vorschlag: Prüftiefe nach Tragweite; was aus Kostengründen nicht geprüft wurde, wird als „nicht geprüft“ markiert statt weggelassen.
-2. **R4 × R3 (Kopplung):** Eine Recherche bei jedem Auftrag kostet jedes Mal. Vorschlag: themenbezogene Neuerungen je Auftrag, allgemeiner Überblick höchstens einmal je Tag.
-3. **R5 (technische Grenze):** Die Session läuft in einem Cloud-Container. Screenshots sind nur von öffentlich erreichbaren Webseiten möglich, nicht von der Desktop-App oder von eingeloggten claude.ai-Seiten. Die Seite speichert Bilder in ihrer Datenbank (je Bild ≤ 250 KB, ≤ 8 je Auftrag). Fremde Bilder von Anthropic werden mit Quellenangabe eingebunden.
-4. **R6 (Missverständnis vermeiden):** Die Session lernt nicht dauerhaft. Wissen über den Workflow des Benutzers bleibt nur erhalten, wenn es aufgeschrieben wird (dieses Regelwerk, die Fortschrittsseite, CLAUDE.md). Nach einer Verdichtung oder in einer neuen Session zählt nur, was dort steht.
-5. **Ablageort:** Dieses Regelwerk liegt im Repo `Privat` (sonst Projekt „Abrechnung“) auf dem Branch der Session. Ein eigenes Repo wäre sauberer getrennt; Entscheidung Benutzer.
+1. R2 × R3: Vorschlag angenommen, in R2 eingearbeitet.
+2. R4 × R3: angenommen mit Grenze höchstens 2× täglich, in R4 eingearbeitet.
+3. R5 Screenshots: geprüft am 26.11.2026 mit Chromium im Container. claude.ai liefert 403 („Just a moment…“, Bot-Schutz), also keine Screenshots von claude.ai aus dem Container. Öffentliche Seiten (z. B. support.claude.com, code.claude.com) gehen. Für App-Screenshots: Benutzer lädt sie hoch, oder (nicht geprüft) Zugriff auf den Rechner des Benutzers über Remote Control.
+4. R6: Konsequenz Gedächtnisdatei, siehe R8 und R9.
+5. Ablage: eigenes Repo gewünscht; bis es existiert, liegen die Dateien im Repo `Privat` unter `claude-guide/`.
+6. Tracking: siehe R10.
