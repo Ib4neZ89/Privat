@@ -1,1 +1,2 @@
 Fortschritt: Skill session-fortschritt, Seite https://claude.ai/artifact/RcMyLLdygBVMieSaE4jLbi
+Fortschritt Session „Claude Code Guide“ (Wissensdatenbank Claude): Skill session-fortschritt, Seite https://claude.ai/artifact/4X4g3dfDCrdCbegp4PvGLu. Den Skill laden, bevor ein Auftrag bearbeitet wird, auch nach Neustart, Wiederaufnahme oder Verdichtung; er regelt, welche Session auf welcher Seite schreibt. Regelwerk dieser Session: claude-guide/REGELWERK.md
